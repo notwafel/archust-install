@@ -25,10 +25,16 @@ Arch installer for the live ISO, written in Rust. No `archinstall` - it partitio
 On the Arch live ISO, as root, with the network up:
 
 ```sh
-pacman -Sy --noconfirm rust git
+pacman -S rust git
 git clone https://github.com/notwafel/archust-install && cd archust-install
+mount -o remount,size=4G /run/archiso/cowspace   # live ISO ships a tiny copy-on-write layer
 ./archust_install.sh
 ```
+
+`rust` and `git` are on the live ISO already, so that `pacman -S` does nothing. Never run
+`pacman -Sy` or `pacman -Syu` on the live ISO to get them: the booted system lives in a small
+tmpfs, a full upgrade overflows it and leaves pacman unable to commit anything.
+The installer grows the layer itself if it finds less than 2 GiB free.
 
 `archust_install.sh` is a tiny launcher: it runs `cargo build --release --locked` (only when the sources changed) and then execs the binary. `--locked` means the build never re-resolves dependencies, so it works on a fresh ISO without network access to crates.io.
 

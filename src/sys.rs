@@ -97,11 +97,41 @@ pub fn prepare_mirrors() {
     if n != 10 {
         die(&format!("expected 10 mirrors, got {}", n));
     }
+    // live writes go to a tmpfs sized at boot; a full install needs far more than the default
+    grow_cowspace();
     quiet("pacman", &["-Syy", "--noconfirm"]);
     quiet("pacman", &["-Sy", "--noconfirm", "--needed",
         "archlinux-keyring", "btrfs-progs", "gptfdisk", "dosfstools", "cryptsetup"]);
     quiet("pacman-key", &["--init"]);
     quiet("pacman-key", &["--populate", "archlinux"]);
+}
+
+/// remounts the archiso copy-on-write layer bigger; `pacstrap` alone needs a few GB there
+pub fn grow_cowspace() {
+    const COWSPACE: &str = "/run/archiso/cowspace";
+    if !exists(COWSPACE) {
+        return;
+    }
+    let avail = out("df", &["-BK", "--output=avail", COWSPACE])
+        .and_then(|s| s.lines().nth(1).map(|v| v.trim().trim_end_matches('K').to_string()))
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(0);
+    if avail >= 2 * 1024 * 1024 {
+        return;
+    }
+    crate::ui::say("cowspace: remounting /run/archiso/cowspace with size=4G");
+    if !quiet_ok("mount", &["-o", "remount,size=4G", COWSPACE]) {
+        crate::ui::warn("could not grow cowspace, pacstrap may run out of space");
+    }
+}
+
+fn quiet_ok(program: &str, args: &[&str]) -> bool {
+    std::process::Command::new(program)
+        .args(args)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success())
 }
 
 
