@@ -71,12 +71,30 @@ pub const REFLECT_COUNTRIES: &str =
      Estonia,Latvia,Lithuania,Romania,Bulgaria,Greece,United States,United Kingdom,Canada,\
      Australia,New Zealand,Japan";
 
-/// Mirrorlist settings shared by the install itself and the target system's reflector.
+/// One flag per line, as `/etc/xdg/reflector/reflector.conf` expects.
 pub fn reflector_conf() -> String {
     format!(
         "--country {}\n--protocol https\n--score 100\n--sort rate\n--fastest 10\n--completion-percent 100\n--save /etc/pacman.d/mirrorlist\n",
         REFLECT_COUNTRIES
     )
+}
+
+/// The same settings as a command line: reflector has no `--config`, only the systemd unit
+/// reads reflector.conf, so the installer has to pass the flags itself.
+fn reflector_args() -> Vec<String> {
+    let mut args = vec!["--country".to_string(), REFLECT_COUNTRIES.to_string()];
+    for (flag, value) in [
+        ("--protocol", "https"),
+        ("--score", "100"),
+        ("--sort", "rate"),
+        ("--fastest", "10"),
+        ("--completion-percent", "100"),
+        ("--save", "/etc/pacman.d/mirrorlist"),
+    ] {
+        args.push(flag.to_string());
+        args.push(value.to_string());
+    }
+    args
 }
 
 /// 10 fastest HTTPS mirrors from trusted countries, then the keyring.
@@ -88,7 +106,9 @@ pub fn prepare_mirrors() {
     }
     fs::write(LIVE_CONF, reflector_conf()).unwrap_or_else(|e| die(&format!("cannot write {}: {}", LIVE_CONF, e)));
     quiet("pacman", &["-Sy", "--noconfirm", "--needed", "reflector"]);
-    run("reflector", &["--config", LIVE_CONF]);
+    let args = reflector_args();
+    let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    run("reflector", &refs);
     let n = fs::read_to_string("/etc/pacman.d/mirrorlist")
         .unwrap_or_default()
         .lines()
@@ -137,7 +157,7 @@ fn quiet_ok(program: &str, args: &[&str]) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::reflector_conf;
+    use super::{reflector_args, reflector_conf};
 
     /// reflector's config parser wants one flag per line, starting with `--`.
     #[test]
@@ -148,5 +168,17 @@ mod tests {
             assert_eq!(line.matches("--").count(), 1, "two flags on one line: {:?}", line);
         }
         assert!(conf.lines().count() >= 6);
+    }
+
+    /// The command line must carry the same settings; reflector rejects `--config`.
+    #[test]
+    fn reflector_args_match_the_conf() {
+        let args = reflector_args();
+        assert!(!args.iter().any(|a| a == "--config"));
+        for flag in ["--country", "--protocol", "--score", "--sort", "--fastest", "--save"] {
+            assert!(args.iter().any(|a| a == flag), "missing {}", flag);
+        }
+        assert_eq!(args[0], "--country");
+        assert_eq!(args.len() % 2, 0, "every flag needs a value: {:?}", args);
     }
 }
