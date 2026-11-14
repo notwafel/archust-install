@@ -7,7 +7,7 @@
 
 <picture>
   <source media="(prefers-color-scheme: light)" srcset="assets/features-light.svg">
-  <img src="assets/features-dark.svg" alt="UEFI and GPT, btrfs, ext4 and xfs, LUKS2, GRUB, Wayland, NVIDIA, AMD, Intel" width="900">
+  <img src="assets/features-dark.svg" alt="UEFI and GPT, btrfs, ext4 and xfs, LUKS2, GRUB, GPU drivers, Wayland" width="900">
 </picture>
 
 [Run](#run) · [Header](#header) · [Questions](#questions) · [What it builds](#what-it-builds) · [Recovery](#recovery) · [Limits](#limits)
@@ -24,6 +24,11 @@ Arch installer for the live ISO, written in Rust. No `archinstall` - it partitio
 <picture>
   <source media="(prefers-color-scheme: light)" srcset="assets/pipeline-light.svg">
   <img src="assets/pipeline-dark.svg" alt="Install pipeline: partition, format, LUKS, mount, pacstrap and fstab, configure." width="900">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: light)" srcset="assets/divider-light.svg">
+  <img src="assets/divider-dark.svg" alt="" width="900">
 </picture>
 
 ## Run
@@ -56,10 +61,25 @@ Type /dev/nvme0n1 to confirm:
 
 Arrow keys / `j` `k` to move, Enter to accept, space toggles in multi-select lists, `Esc` / `Ctrl-C` aborts. Nothing else throws you out: a wrong answer is re-asked - empty hostname or username, mismatched or short passwords, a disk that is not a whole disk, a filesystem too small for the plan.
 
+<picture>
+  <source media="(prefers-color-scheme: light)" srcset="assets/controls-light.svg">
+  <img src="assets/controls-dark.svg" alt="Controls: arrow keys or j and k to move, Enter to accept, Space to toggle in multi-select lists, Esc or Ctrl-C to abort" width="900">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: light)" srcset="assets/divider-light.svg">
+  <img src="assets/divider-dark.svg" alt="" width="900">
+</picture>
+
 ## Questions
 
 Eight numbered sections, each starting with a header like `[3/8] Sizes`. Bad input is re-asked,
 never fatal.
+
+<picture>
+  <source media="(prefers-color-scheme: light)" srcset="assets/terminal-light.svg">
+  <img src="assets/terminal-dark.svg" alt="Terminal preview of the eight installer sections" width="900">
+</picture>
 
 | step | section | what | default |
 |---|---|---|---|
@@ -78,7 +98,22 @@ Wiping is the one question that cannot be answered by pressing Enter: the disk n
 typed back. Before the partition table is replaced the installer also refuses a disk with any
 mounted partition.
 
+<picture>
+  <source media="(prefers-color-scheme: light)" srcset="assets/safeguards-light.svg">
+  <img src="assets/safeguards-dark.svg" alt="Safeguards: typed confirmation, mounted disk refused, live ISO disk hidden, ESP verified, multilib read back, firmware names checked" width="900">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: light)" srcset="assets/divider-light.svg">
+  <img src="assets/divider-dark.svg" alt="" width="900">
+</picture>
+
 ## What it builds
+
+<picture>
+  <source media="(prefers-color-scheme: light)" srcset="assets/layout-light.svg">
+  <img src="assets/layout-dark.svg" alt="Disk layout: EFI, swap, root with optional LUKS2 and btrfs subvolumes" width="900">
+</picture>
 
 - GPT, UEFI only. Full wipe or dualboot (existing EFI partition reused as `/boot`, new partitions appended after the last one).
 - Root filesystem: **btrfs** (subvolumes `@`, `@home`, `@log`, `@pkg`, `@snapshots`, `@swp`, `noatime,compress=zstd:1`), **ext4** or **xfs** (single root, `noatime`). Subvolumes only exist on btrfs; the GRUB line follows the choice (`rootfstype=`, `rootflags=subvol=@` on btrfs only).
@@ -140,7 +175,17 @@ No desktop environment, no browser, no compositor. Archust Install stops at a sy
   flags: reflector has no `--config`. With the `reflector` group pre-ticked, the config is
   written into the target and `reflector.timer` is enabled, so the mirrorlist stays fresh.
 
+<picture>
+  <source media="(prefers-color-scheme: light)" srcset="assets/divider-light.svg">
+  <img src="assets/divider-dark.svg" alt="" width="900">
+</picture>
+
 ## Recovery
+
+<picture>
+  <source media="(prefers-color-scheme: light)" srcset="assets/recovery-light.svg">
+  <img src="assets/recovery-dark.svg" alt="Recovery after a failed run: swapoff, umount, cryptsetup close, run the installer again" width="900">
+</picture>
 
 A failed run leaves `/mnt` mounted, swap active and partitions written. Clean up before trying
 again, or the installer starts on a dirty `/mnt`:
