@@ -12,7 +12,10 @@
 
 <br>
 
-Arch installer for the live ISO, written in Rust. No `archinstall` - it partitions, formats, encrypts and bootstraps the system itself. Plain Arch, nothing else: base packages, kernel, firmware, drivers, NetworkManager, GRUB. Add whatever you want afterwards.
+Arch installer for the live ISO, written in Rust. No `archinstall`: it partitions, formats,
+encrypts and bootstraps the system itself. It installs a plain Arch base, then prompts for the
+kernel, GPU driver, filesystem, encryption and preselected optional package groups. No desktop,
+browser or compositor is installed.
 
 > [!WARNING]
 > **Not tested on real hardware.** The TUI and the install path have not run on a live ISO yet. Try it in a VM first.
@@ -28,17 +31,16 @@ Arch installer for the live ISO, written in Rust. No `archinstall` - it partitio
 On the Arch live ISO, as root, with the network up:
 
 ```sh
-pacman -S rust git
+mount -o remount,size=4G /run/archiso/cowspace      # live ISO ships a tiny copy-on-write layer
+sudo reflector --country Poland,Germany,Czechia --protocol https --latest 20 --sort rate --save /etc/pacman.d/mirrorlist      # u can use without --country flag
+pacman -Syu --noconfirm rust git
 git clone https://github.com/notwafel/archust-install && cd archust-install
-mount -o remount,size=4G /run/archiso/cowspace   # live ISO ships a tiny copy-on-write layer
 ./archust_install.sh
 ```
 
-`rust` and `git` are on the live ISO already, so that `pacman -S` does nothing. The installer
-never runs `pacman -Syu` on the live ISO: the booted system lives in a small tmpfs and a full
-upgrade overflows it. It grows the layer itself if it finds less than 2 GiB free.
-
-`archust_install.sh` is a tiny launcher: it runs `cargo build --release --locked` (only when the sources changed) and then execs the binary. `--locked` means the build never re-resolves dependencies, so it works on a fresh ISO without network access to crates.io.
+`archust_install.sh` builds `target/release/archust-install` with `cargo build --release --locked`
+when `src/` or `Cargo.toml` changed, then execs it. `--locked` keeps the committed dependency
+versions; first builds can still need crates.io to download uncached dependencies.
 
 ## Header
 
@@ -51,7 +53,9 @@ Every run shows the same eight numbered sections, so you always know where you a
 Type /dev/nvme0n1 to confirm:
 ```
 
-Arrow keys / `j` `k` to move, Enter to accept, space toggles in multi-select lists, `Esc` / `Ctrl-C` aborts. Nothing else throws you out: a wrong answer is re-asked - empty hostname or username, mismatched or short passwords, a disk that is not a whole disk, a filesystem too small for the plan.
+Arrow keys / `j` `k` move, Enter accepts, space toggles multi-select lists, and `Esc` / `Ctrl-C`
+aborts. Invalid hostnames, usernames, passwords and impossible partition sizes are re-asked. A
+wrong wipe confirmation aborts the run.
 
 ![Controls: arrow keys or j and k to move, Enter to accept, Space to toggle in multi-select lists, Esc or Ctrl-C to abort](assets/controls-dark.svg#gh-dark-mode-only)
 ![Controls: arrow keys or j and k to move, Enter to accept, Space to toggle in multi-select lists, Esc or Ctrl-C to abort](assets/controls-light.svg#gh-light-mode-only)
@@ -61,39 +65,43 @@ Arrow keys / `j` `k` to move, Enter to accept, space toggles in multi-select lis
 
 ## Questions
 
-Eight numbered sections, each starting with a header like `[3/8] Sizes`. Bad input is re-asked,
-never fatal.
+Eight numbered sections, each starting with a header like `[3/8] Sizes`. Validation errors are
+re-asked; a wrong typed wipe confirmation aborts.
 
 ![Terminal preview of the eight installer sections](assets/terminal-dark.svg#gh-dark-mode-only)
 ![Terminal preview of the eight installer sections](assets/terminal-light.svg#gh-light-mode-only)
 
 | step | section | what | default |
 |---|---|---|---|
-| 1 | Disk | pick a whole disk from a list; the live ISO's own disk is not in it | first disk |
-| 2 | Partitioning | keep existing partitions and install into the free space, or wipe | keep, if free space >= 16 GiB |
-| 3 | Sizes | swap GiB, root GiB (0 = rest), EFI size when wiping | 4, 0, 1024 MiB |
-| 4 | Filesystem and encryption | btrfs / ext4 / xfs, LUKS, then the plan | btrfs, no LUKS |
-| 5 | Hardware | kernel, GPU driver | linux, detected |
-| 6 | Packages | multilib, Wayland stack, extra groups | all on |
-| 7 | System | hostname, username, timezone, keymap, locale, shell | none, none, UTC, us, en_US, bash |
-| 8 | Passwords | LUKS passphrase (only with LUKS), user, root | 8 characters, typed twice |
+| 1 | Disk | select a whole disk; the disk reported as the live ISO boot disk is excluded | first listed disk |
+| 2 | Partitioning | reuse an existing ESP and install after the last partition, or wipe | keep existing partitions when present |
+| 3 | Sizes | swap GiB, root GiB (`0` = remaining usable space), EFI size for a wipe | `4`, `0`, `1024` MiB |
+| 4 | Filesystem and encryption | btrfs / ext4 / xfs, optional LUKS, then show the plan | btrfs, LUKS off |
+| 5 | Hardware | kernel and GPU driver | `linux`, detected GPU |
+| 6 | Packages | multilib, Wayland + XWayland, nine optional groups | all selected |
+| 7 | System | hostname, username, timezone, keymap, locale, login shell | —, —, UTC, us, en_US, bash |
+| 8 | Passwords | LUKS passphrase when selected, user and root passwords | minimum 8 characters, typed twice |
 
-Hibernation is asked right after the sizes and only when swap is at least as large as RAM.
+The dualboot branch requires an existing ESP and at least 16 GiB after the last partition. An
+empty disk always takes the wipe branch. The EFI partition must be at least 300 MiB.
 
-Wiping is the one question that cannot be answered by pressing Enter: the disk name has to be
-typed back. Before the partition table is replaced the installer also refuses a disk with any
-mounted partition.
+Hibernation is offered only when swap is at least RAM and at least 1 GiB. It is off unless you
+accept the prompt. After every answer, the installer prints the selected packages and asks `Start
+the installation?`; its default is no.
 
-![Safeguards: typed confirmation, mounted disk refused, live ISO disk hidden, ESP verified, multilib read back, firmware names checked](assets/safeguards-dark.svg#gh-dark-mode-only)
-![Safeguards: typed confirmation, mounted disk refused, live ISO disk hidden, ESP verified, multilib read back, firmware names checked](assets/safeguards-light.svg#gh-light-mode-only)
+Wiping cannot be accepted with Enter: type the disk path exactly. Before `parted mklabel`, the
+installer runs `findmnt -S <disk>` and aborts when it finds a mounted source.
+
+![Safeguards: typed confirmation, mounted source check, live ISO boot disk excluded, ESP verified, multilib read back, firmware names checked](assets/safeguards-dark.svg#gh-dark-mode-only)
+![Safeguards: typed confirmation, mounted source check, live ISO boot disk excluded, ESP verified, multilib read back, firmware names checked](assets/safeguards-light.svg#gh-light-mode-only)
 
 ![](assets/divider-dark.svg#gh-dark-mode-only)
 ![](assets/divider-light.svg#gh-light-mode-only)
 
 ## What it builds
 
-![Disk layout: EFI, swap, root with optional LUKS2 and btrfs subvolumes](assets/layout-dark.svg#gh-dark-mode-only)
-![Disk layout: EFI, swap, root with optional LUKS2 and btrfs subvolumes](assets/layout-light.svg#gh-light-mode-only)
+![Diagram of the intended btrfs layout: EFI, swap, root with optional LUKS2 and subvolumes](assets/layout-dark.svg#gh-dark-mode-only)
+![Diagram of the intended btrfs layout: EFI, swap, root with optional LUKS2 and subvolumes](assets/layout-light.svg#gh-light-mode-only)
 
 ![Specs: filesystems, LUKS2, GRUB, NVIDIA parameters, services](assets/specs-dark.svg#gh-dark-mode-only)
 ![Specs: filesystems, LUKS2, GRUB, NVIDIA parameters, services](assets/specs-light.svg#gh-light-mode-only)
@@ -103,12 +111,22 @@ mounted partition.
 
 <br>
 
-- GPT, UEFI only. Full wipe or dualboot (existing EFI partition reused as `/boot`, new partitions appended after the last one).
-- Root filesystem: **btrfs** (subvolumes `@`, `@home`, `@log`, `@pkg`, `@snapshots`, `@swp`, `noatime,compress=zstd:1`), **ext4** or **xfs** (single root, `noatime`). Subvolumes only exist on btrfs; the GRUB line follows the choice (`rootfstype=`, `rootflags=subvol=@` on btrfs only).
-- Optional **LUKS2** on the root partition: AES-XTS-plain64, 512-bit key, SHA-512, Argon2id. `encrypt` hook goes into the initramfs, one passphrase unlocks root at boot. The passphrase reaches `cryptsetup` on stdin, never on the command line.
-- **GRUB** (EFI, `--target=x86_64-efi`) with `GRUB_TERMINAL=console`, `GRUB_TIMEOUT=3`, `loglevel=3 quiet rw`, `os-prober` enabled. The install stops if `grub-install` wrote nothing to the ESP.
-- Nvidia: `nvidia_drm.modeset=1`, `nvidia.NVReg_PreserveVideoMemoryAllocations=1` on the kernel command line, modules in the initramfs, `systemd-udevd` with `PrivateMounts=no`.
-- `systemd-timesyncd` + NetworkManager enabled. Bluetooth is not installed.
+- GPT, UEFI only. Full wipe or dualboot. Dualboot reuses an existing EFI partition as `/boot` and
+  creates new partitions after the last existing one.
+- **ext4** or **xfs**: one root filesystem mounted with `noatime`. `e2fsprogs` or `xfsprogs` is
+  added to `pacstrap` for the selected filesystem.
+- **btrfs currently does not complete on a new filesystem.** The mount step requests `subvol=@`
+  before the code creates `@`; it only creates `@home`, `@log`, `@pkg`, `@snapshots` and `@swp`
+  afterwards. Use ext4 or xfs until that path is fixed.
+- Optional **LUKS2** on the root partition: AES-XTS-plain64, 512-bit key, SHA-512 and Argon2id.
+  The passphrase reaches `cryptsetup` on stdin, never on the command line.
+- **GRUB** EFI: `--target=x86_64-efi`, `GRUB_TERMINAL=console`, `GRUB_TIMEOUT=3`,
+  `loglevel=3 quiet rw`, `os-prober` enabled. The install checks for
+  `/boot/EFI/GRUB/grubx64.efi` after `grub-install`.
+- Nvidia proprietary and open drivers add `nvidia_drm.modeset=1` and
+  `nvidia.NVreg_PreserveVideoMemoryAllocations=1`, initramfs modules, and
+  `systemd-udevd` with `PrivateMounts=no`.
+- NetworkManager, `systemd-timesyncd` and `fstrim.timer` are enabled. Bluetooth is not installed.
 
 </details>
 
@@ -117,30 +135,43 @@ mounted partition.
 
 <br>
 
-```
-base base-devel locales <kernel> linux-headers linux-firmware dkms intel-ucode|amd-ucode
-grub efibootmgr dosfstools mtools btrfs-progs
-networkmanager sudo man-db bash-completion nano curl git flatpak
-pipewire pipewire-pulse pipewire-alsa wireplumber alsa-utils
-mesa vulkan-icd-loader libva-utils
-+ GPU: vulkan-intel intel-media-driver | vulkan-radeon libva-mesa-driver
-       nvidia-dkms / nvidia-open-dkms + nvidia-utils libva-nvidia-driver
-+ multilib: lib32-mesa lib32-vulkan-icd-loader lib32-libva lib32-alsa-plugins lib32-gnutls
-  (+ lib32-nvidia-utils on NVIDIA)
-+ wayland: wayland wayland-protocols xorg-xwayland libxkbcommon xkeyboard-config
-  libinput xf86-input-libinput seatd mesa-utils vulkan-tools xdg-desktop-portal xdg-utils
-+ xfsprogs (xfs) or e2fsprogs (ext4)
-+ firmware group: linux-firmware-intel linux-firmware-realtek linux-firmware-nvidia
-+ cryptsetup, only with LUKS
-+ os-prober, only in dualboot
+```text
+Always:
+  base base-devel linux-headers linux-firmware dkms locales
+  grub efibootmgr dosfstools mtools networkmanager sudo bash-completion
+  selected kernel; intel-ucode or amd-ucode when detected
+
+Selected GPU:
+  Intel: vulkan-intel intel-media-driver
+  AMD: vulkan-radeon libva-mesa-driver
+  NVIDIA: nvidia-dkms or nvidia-open-dkms, nvidia-utils, libva-nvidia-driver
+  nouveau / VM: no additional GPU packages
+
+Selected options:
+  multilib: lib32-mesa lib32-vulkan-icd-loader lib32-libva lib32-alsa-plugins lib32-gnutls
+            plus lib32-nvidia-utils for NVIDIA proprietary or open
+  Wayland: wayland wayland-protocols xorg-xwayland libxkbcommon xkeyboard-config
+           libinput xf86-input-libinput seatd mesa-utils vulkan-tools xdg-desktop-portal xdg-utils
+  ext4: e2fsprogs
+  xfs: xfsprogs
+  LUKS: cryptsetup
+  dualboot: os-prober
+  zsh / fish: zsh / fish
+
+Preselected optional groups:
+  nano curl git flatpak pipewire man-db reflector graphics firmware
 ```
 
-nano, curl, git, flatpak, pipewire, man-db, graphics and firmware are group choices, and so is
-the login shell (`zsh` or `fish` is installed only when picked). Untick a group and its packages are not installed. With the Wayland answer on, `pacman -S gnome` (or `plasma`, `sway`, ...) works right away.
+The optional groups start selected but can be unticked. They expand to the packages in step 6:
+`pipewire` adds PipeWire and ALSA tools; `graphics` adds Mesa/Vulkan/VA tools; `firmware` adds
+`linux-firmware-intel`, `linux-firmware-realtek` and `linux-firmware-nvidia`.
 
-The installer checks `linux-firmware-intel`, `linux-firmware-realtek` and
-`linux-firmware-nvidia` against the repository database before it touches the disk, so a renamed
-package stops the run instead of failing inside `pacstrap` at the very end.
+`linux-headers` is always installed, including with `linux-lts` and `linux-zen`. It does not add
+matching `linux-lts-headers` or `linux-zen-headers`; do that manually before using DKMS on either
+kernel.
+
+The installer validates the three optional firmware names against current repositories before it
+touches the disk. A renamed package stops the run before `pacstrap`.
 
 </details>
 
@@ -159,19 +190,19 @@ No desktop environment, no browser, no compositor. Archust Install stops at a sy
 - `/etc/sysctl.d/80-gamecompatibility.conf`: `vm.max_map_count = 2147483642` (Proton/Wine/DXVK
   need it) and `vm.swappiness = 10` (Arch defaults to 60, which pushes RAM to swap too early),
   applied with `sysctl --system` during the install.
-- Hibernation: `resume` hook, `RESUME=UUID=` in the initramfs and `resume=UUID=` added to the
-  GRUB line through `/etc/default/grub.d/10-resume.cfg`. Written only when swap is at least as
-  large as RAM and the question was answered yes. The swap partition is activated right after
-  `mkswap`, so `genfstab` picks it up.
+- Hibernation: any selected swap partition gets `RESUME=UUID=` in the initramfs configuration.
+  When swap is at least RAM and the hibernation prompt is accepted, it also adds the `resume`
+  hook and `resume=UUID=` through `/etc/default/grub.d/10-resume.cfg`. Swap is enabled directly
+  after `mkswap`, before `genfstab` creates `/etc/fstab`.
 - `fstrim.timer` enabled, so SSD TRIM actually runs.
 - `/etc/sysctl.d/99-no-core-dumps.conf`: `kernel.core_pattern = |/bin/false` - a crash writes no multi-GB dump to disk.
 - multilib: `[multilib]` uncommented in `/etc/pacman.conf`, on the installed system and on the live ISO (so pacstrap can pull the `lib32-*` packages). The target copy is read back and the install stops if it is still commented out.
 - GRUB: `loglevel=3 quiet rw`, `GRUB_TIMEOUT=3`, console terminal.
 - `%wheel` gets sudo through `/etc/sudoers.d/10-wheel`.
 - Mirrors: `reflector` picks 10 fastest HTTPS mirrors from trusted countries before anything
-  else runs. Same settings once, written as `/etc/xdg/reflector/reflector.conf` and passed as
-  flags: reflector has no `--config`. With the `reflector` group pre-ticked, the config is
-  written into the target and `reflector.timer` is enabled, so the mirrorlist stays fresh.
+  else runs. One setting table renders `/etc/xdg/reflector/reflector.conf` and its command-line
+  flags; reflector has no `--config`. When the optional `reflector` group is selected, the config
+  is written into the target and the installer attempts to enable `reflector.timer`.
 
 </details>
 
@@ -242,12 +273,17 @@ Runs the partition arithmetic on fixed cases (wipe, dualboot, swap, fixed root) 
 ## Limits
 
 - **UEFI only**, x86_64.
-- Not tested on real hardware. The TUI and the install path have not run on a live ISO yet.
-- `nvidia-dkms` needs the `linux-headers` matching your kernel; `nvidia-open-dkms` needs Turing (RTX 20xx) or newer. Older cards: pick `nvidia-dkms`.
-- Dualboot needs an existing EFI partition and free space after the last one. No shrinking, no resizing of existing partitions.
-- Timezone, keymap and locale lists are short. The keymap list has `uk`, not `gb`.
-- No btrfs snapshot tool, no zram, no encrypted swap.
-- Small installer, not general-purpose. Run `--check` and `cargo test` after any edit.
+- Not tested on real hardware. The TUI and install path have not run on a live ISO yet.
+- **btrfs is currently broken:** it mounts `subvol=@` before creating `@`. Choose ext4 or xfs.
+- The installer always adds `linux-headers`; it does not add matching headers for `linux-lts` or
+  `linux-zen`. Add those manually before using DKMS.
+- GPU detection chooses a default only. It does not validate NVIDIA hardware compatibility with
+  the selected driver package.
+- Dualboot needs an existing EFI partition and at least 16 GiB after the last partition. No
+  shrinking or resizing of existing partitions.
+- Timezone, keymap and locale use fixed short lists. The keymap list has `uk`, not `gb`.
+- No snapshot tool, zram or encrypted swap.
+- Small installer, not general-purpose. Run `--check` and `cargo test` after each edit.
 
 ![](assets/divider-dark.svg#gh-dark-mode-only)
 ![](assets/divider-light.svg#gh-light-mode-only)
