@@ -1,14 +1,10 @@
 <div align="center">
 
-<picture>
-  <source media="(prefers-color-scheme: light)" srcset="assets/banner-light.svg">
-  <img src="assets/banner-dark.svg" alt="Archust Install" width="900">
-</picture>
+![Archust Install](assets/banner-dark.svg#gh-dark-mode-only)
+![Archust Install](assets/banner-light.svg#gh-light-mode-only)
 
-<picture>
-  <source media="(prefers-color-scheme: light)" srcset="assets/features-light.svg">
-  <img src="assets/features-dark.svg" alt="UEFI and GPT, btrfs, ext4 and xfs, LUKS2, GRUB, GPU drivers, Wayland" width="900">
-</picture>
+![UEFI and GPT, btrfs, ext4 and xfs, LUKS2, GRUB, GPU drivers, Wayland](assets/features-dark.svg#gh-dark-mode-only)
+![UEFI and GPT, btrfs, ext4 and xfs, LUKS2, GRUB, GPU drivers, Wayland](assets/features-light.svg#gh-light-mode-only)
 
 [Run](#run) · [Header](#header) · [Questions](#questions) · [What it builds](#what-it-builds) · [Recovery](#recovery) · [Limits](#limits)
 
@@ -21,15 +17,11 @@ Arch installer for the live ISO, written in Rust. No `archinstall` - it partitio
 > [!WARNING]
 > **Not tested on real hardware.** The TUI and the install path have not run on a live ISO yet. Try it in a VM first.
 
-<picture>
-  <source media="(prefers-color-scheme: light)" srcset="assets/pipeline-light.svg">
-  <img src="assets/pipeline-dark.svg" alt="Install pipeline: partition, format, LUKS, mount, pacstrap and fstab, configure." width="900">
-</picture>
+![Install pipeline: partition, format, LUKS, mount, pacstrap and fstab, configure.](assets/pipeline-dark.svg#gh-dark-mode-only)
+![Install pipeline: partition, format, LUKS, mount, pacstrap and fstab, configure.](assets/pipeline-light.svg#gh-light-mode-only)
 
-<picture>
-  <source media="(prefers-color-scheme: light)" srcset="assets/divider-light.svg">
-  <img src="assets/divider-dark.svg" alt="" width="900">
-</picture>
+![](assets/divider-dark.svg#gh-dark-mode-only)
+![](assets/divider-light.svg#gh-light-mode-only)
 
 ## Run
 
@@ -61,25 +53,19 @@ Type /dev/nvme0n1 to confirm:
 
 Arrow keys / `j` `k` to move, Enter to accept, space toggles in multi-select lists, `Esc` / `Ctrl-C` aborts. Nothing else throws you out: a wrong answer is re-asked - empty hostname or username, mismatched or short passwords, a disk that is not a whole disk, a filesystem too small for the plan.
 
-<picture>
-  <source media="(prefers-color-scheme: light)" srcset="assets/controls-light.svg">
-  <img src="assets/controls-dark.svg" alt="Controls: arrow keys or j and k to move, Enter to accept, Space to toggle in multi-select lists, Esc or Ctrl-C to abort" width="900">
-</picture>
+![Controls: arrow keys or j and k to move, Enter to accept, Space to toggle in multi-select lists, Esc or Ctrl-C to abort](assets/controls-dark.svg#gh-dark-mode-only)
+![Controls: arrow keys or j and k to move, Enter to accept, Space to toggle in multi-select lists, Esc or Ctrl-C to abort](assets/controls-light.svg#gh-light-mode-only)
 
-<picture>
-  <source media="(prefers-color-scheme: light)" srcset="assets/divider-light.svg">
-  <img src="assets/divider-dark.svg" alt="" width="900">
-</picture>
+![](assets/divider-dark.svg#gh-dark-mode-only)
+![](assets/divider-light.svg#gh-light-mode-only)
 
 ## Questions
 
 Eight numbered sections, each starting with a header like `[3/8] Sizes`. Bad input is re-asked,
 never fatal.
 
-<picture>
-  <source media="(prefers-color-scheme: light)" srcset="assets/terminal-light.svg">
-  <img src="assets/terminal-dark.svg" alt="Terminal preview of the eight installer sections" width="900">
-</picture>
+![Terminal preview of the eight installer sections](assets/terminal-dark.svg#gh-dark-mode-only)
+![Terminal preview of the eight installer sections](assets/terminal-light.svg#gh-light-mode-only)
 
 | step | section | what | default |
 |---|---|---|---|
@@ -98,22 +84,24 @@ Wiping is the one question that cannot be answered by pressing Enter: the disk n
 typed back. Before the partition table is replaced the installer also refuses a disk with any
 mounted partition.
 
-<picture>
-  <source media="(prefers-color-scheme: light)" srcset="assets/safeguards-light.svg">
-  <img src="assets/safeguards-dark.svg" alt="Safeguards: typed confirmation, mounted disk refused, live ISO disk hidden, ESP verified, multilib read back, firmware names checked" width="900">
-</picture>
+![Safeguards: typed confirmation, mounted disk refused, live ISO disk hidden, ESP verified, multilib read back, firmware names checked](assets/safeguards-dark.svg#gh-dark-mode-only)
+![Safeguards: typed confirmation, mounted disk refused, live ISO disk hidden, ESP verified, multilib read back, firmware names checked](assets/safeguards-light.svg#gh-light-mode-only)
 
-<picture>
-  <source media="(prefers-color-scheme: light)" srcset="assets/divider-light.svg">
-  <img src="assets/divider-dark.svg" alt="" width="900">
-</picture>
+![](assets/divider-dark.svg#gh-dark-mode-only)
+![](assets/divider-light.svg#gh-light-mode-only)
 
 ## What it builds
 
-<picture>
-  <source media="(prefers-color-scheme: light)" srcset="assets/layout-light.svg">
-  <img src="assets/layout-dark.svg" alt="Disk layout: EFI, swap, root with optional LUKS2 and btrfs subvolumes" width="900">
-</picture>
+![Disk layout: EFI, swap, root with optional LUKS2 and btrfs subvolumes](assets/layout-dark.svg#gh-dark-mode-only)
+![Disk layout: EFI, swap, root with optional LUKS2 and btrfs subvolumes](assets/layout-light.svg#gh-light-mode-only)
+
+![Specs: filesystems, LUKS2, GRUB, NVIDIA parameters, services](assets/specs-dark.svg#gh-dark-mode-only)
+![Specs: filesystems, LUKS2, GRUB, NVIDIA parameters, services](assets/specs-light.svg#gh-light-mode-only)
+
+<details>
+<summary><b>What it builds in detail</b></summary>
+
+<br>
 
 - GPT, UEFI only. Full wipe or dualboot (existing EFI partition reused as `/boot`, new partitions appended after the last one).
 - Root filesystem: **btrfs** (subvolumes `@`, `@home`, `@log`, `@pkg`, `@snapshots`, `@swp`, `noatime,compress=zstd:1`), **ext4** or **xfs** (single root, `noatime`). Subvolumes only exist on btrfs; the GRUB line follows the choice (`rootfstype=`, `rootflags=subvol=@` on btrfs only).
@@ -121,6 +109,8 @@ mounted partition.
 - **GRUB** (EFI, `--target=x86_64-efi`) with `GRUB_TERMINAL=console`, `GRUB_TIMEOUT=3`, `loglevel=3 quiet rw`, `os-prober` enabled. The install stops if `grub-install` wrote nothing to the ESP.
 - Nvidia: `nvidia_drm.modeset=1`, `nvidia.NVReg_PreserveVideoMemoryAllocations=1` on the kernel command line, modules in the initramfs, `systemd-udevd` with `PrivateMounts=no`.
 - `systemd-timesyncd` + NetworkManager enabled. Bluetooth is not installed.
+
+</details>
 
 <details>
 <summary><b>Installed packages</b></summary>
@@ -158,6 +148,14 @@ No desktop environment, no browser, no compositor. Archust Install stops at a sy
 
 ### Tweaks
 
+![Tweaks: game compatibility, swappiness, hibernation, SSD TRIM, no core dumps, multilib, sudo, mirrors](assets/tweaks-dark.svg#gh-dark-mode-only)
+![Tweaks: game compatibility, swappiness, hibernation, SSD TRIM, no core dumps, multilib, sudo, mirrors](assets/tweaks-light.svg#gh-light-mode-only)
+
+<details>
+<summary><b>Tweaks in detail</b></summary>
+
+<br>
+
 - `/etc/sysctl.d/80-gamecompatibility.conf`: `vm.max_map_count = 2147483642` (Proton/Wine/DXVK
   need it) and `vm.swappiness = 10` (Arch defaults to 60, which pushes RAM to swap too early),
   applied with `sysctl --system` during the install.
@@ -175,17 +173,15 @@ No desktop environment, no browser, no compositor. Archust Install stops at a sy
   flags: reflector has no `--config`. With the `reflector` group pre-ticked, the config is
   written into the target and `reflector.timer` is enabled, so the mirrorlist stays fresh.
 
-<picture>
-  <source media="(prefers-color-scheme: light)" srcset="assets/divider-light.svg">
-  <img src="assets/divider-dark.svg" alt="" width="900">
-</picture>
+</details>
+
+![](assets/divider-dark.svg#gh-dark-mode-only)
+![](assets/divider-light.svg#gh-light-mode-only)
 
 ## Recovery
 
-<picture>
-  <source media="(prefers-color-scheme: light)" srcset="assets/recovery-light.svg">
-  <img src="assets/recovery-dark.svg" alt="Recovery after a failed run: swapoff, umount, cryptsetup close, run the installer again" width="900">
-</picture>
+![Recovery after a failed run: swapoff, umount, cryptsetup close, run the installer again](assets/recovery-dark.svg#gh-dark-mode-only)
+![Recovery after a failed run: swapoff, umount, cryptsetup close, run the installer again](assets/recovery-light.svg#gh-light-mode-only)
 
 A failed run leaves `/mnt` mounted, swap active and partitions written. Clean up before trying
 again, or the installer starts on a dirty `/mnt`:
@@ -229,6 +225,9 @@ Pipeline: partition -> format -> LUKS -> mount -> pacstrap + fstab -> configure.
 
 </details>
 
+![](assets/divider-dark.svg#gh-dark-mode-only)
+![](assets/divider-light.svg#gh-light-mode-only)
+
 ## Self-check
 
 ```sh
@@ -236,6 +235,9 @@ Pipeline: partition -> format -> LUKS -> mount -> pacstrap + fstab -> configure.
 ```
 
 Runs the partition arithmetic on fixed cases (wipe, dualboot, swap, fixed root) and rejection cases (oversized root, tiny disk, EFI under 300 MiB). Fails on overlap, overflow, or a plan that does not end with root. `cargo test` covers the kernel command line (xfs, btrfs, LUKS), the initramfs hook order, the `[multilib]` uncommenting and the two `reflector` renderings.
+
+![Self-check: accepts wipe, dualboot, swap, fixed root; rejects oversized root, tiny disk, EFI under 300 MiB; fails on overlap, overflow, a plan not ending with root](assets/selfcheck-dark.svg#gh-dark-mode-only)
+![Self-check: accepts wipe, dualboot, swap, fixed root; rejects oversized root, tiny disk, EFI under 300 MiB; fails on overlap, overflow, a plan not ending with root](assets/selfcheck-light.svg#gh-light-mode-only)
 
 ## Limits
 
@@ -247,10 +249,8 @@ Runs the partition arithmetic on fixed cases (wipe, dualboot, swap, fixed root) 
 - No btrfs snapshot tool, no zram, no encrypted swap.
 - Small installer, not general-purpose. Run `--check` and `cargo test` after any edit.
 
-<br>
+![](assets/divider-dark.svg#gh-dark-mode-only)
+![](assets/divider-light.svg#gh-light-mode-only)
 
-<div align="center">
-
-<sub>Project by <b>notwafel</b></sub>
-
-</div>
+![Plain Arch. Nothing else. Project by notwafel](assets/footer-dark.svg#gh-dark-mode-only)
+![Plain Arch. Nothing else. Project by notwafel](assets/footer-light.svg#gh-light-mode-only)
