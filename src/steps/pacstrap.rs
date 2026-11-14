@@ -7,7 +7,7 @@ use crate::ui::{die, say};
 
 const LIVE_CONF: &str = "/etc/pacman.conf";
 
-pub fn base(cfg: &Config) {
+pub fn base(cfg: &Config, swap: &Option<(String, bool)>) {
     if cfg.multilib {
         say("multilib: uncommenting [multilib] in pacman.conf");
         // the target copy only exists after pacstrap, so only the live copy can be edited now;
@@ -19,7 +19,7 @@ pub fn base(cfg: &Config) {
     }
 
     say("pacstrap");
-    let mut args = vec!["-K", MNT];
+    let mut args: Vec<&str> = vec!["-K", MNT];
     args.extend_from_slice(&cfg.packages);
     match cfg.fs {
         Fs::Xfs => args.push("xfsprogs"),
@@ -31,11 +31,27 @@ pub fn base(cfg: &Config) {
     if cfg.multilib {
         let live = std::fs::read_to_string(LIVE_CONF).unwrap_or_else(|_| die("cannot read live pacman.conf"));
         write_file("/etc/pacman.conf", &live);
+        // pacstrap -C or a failed copy would leave the target without [multilib]
+        let stuck = std::fs::read_to_string(format!("{}{}", MNT, LIVE_CONF)).unwrap_or_default();
+        if uncomment_multilib(&stuck) != stuck {
+            die("multilib is not enabled in the target /etc/pacman.conf");
+        }
     }
 
     say("fstab");
     let fstab = out("genfstab", &["-U", MNT]).unwrap_or_else(|| die("genfstab failed"));
     write_file("/etc/fstab", &fstab);
+
+    // genfstab only sees a formatted swap that is active; `swapon` must come before it
+    if let Some((sw, hibernate)) = swap {
+        write_file("/etc/mkinitcpio.conf.d/10-resume-device.conf",
+            &format!("RESUME=UUID={}\n", crate::steps::filesystems::root_uuid(sw)));
+        if *hibernate {
+            write_file("/etc/default/grub.d/10-resume.cfg",
+                &format!("GRUB_CMDLINE_LINUX_DEFAULT=\"${{GRUB_CMDLINE_LINUX_DEFAULT}} resume=UUID={}\"\n",
+                    crate::steps::filesystems::root_uuid(sw)));
+        }
+    }
 }
 
 /// Uncomments the `[multilib]` repo block, keeping everything else untouched.

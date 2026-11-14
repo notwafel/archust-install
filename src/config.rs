@@ -19,6 +19,6 @@ pub struct Config {
     pub user_pass: String,
     pub root_pass: String,
     pub packages: Vec<&'static str>,
-    /// Swap partition to resume from: device and whether hibernation was asked for.
-    pub swap: Option<(String, bool)>,
+    /// Hibernation was asked for; the swap device is only known once the partitions exist.
+    pub hibernate: bool,
 }
