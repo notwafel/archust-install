@@ -3,9 +3,9 @@
 use crate::config::Config;
 use crate::steps::luks;
 use crate::sys::{chroot, quiet, with_stdin, write_file};
-use crate::ui::say;
+use crate::ui::{die, say};
 
-pub fn configure(cfg: &Config, root_dev: &str) {
+pub fn configure(cfg: &Config, root_dev: &str, swap: &Option<(String, bool)>) {
     say("System configuration");
 
     write_file("/etc/locale.gen", &format!("en_US.UTF-8 UTF-8\n{}.UTF-8 UTF-8\n", cfg.locale));
@@ -24,14 +24,10 @@ pub fn configure(cfg: &Config, root_dev: &str) {
     let root_uuid = crate::steps::filesystems::root_uuid(root_dev);
     write_file("/etc/default/grub", &grub_default(cfg, &root_uuid));
 
-    let hibernate = matches!(&cfg.swap, Some((_, true)));
+    let hibernate = matches!(swap, Some((_, true)));
     if cfg.luks || hibernate {
         // one HOOKS= only: a second drop-in would replace the first
-        write_file("/etc/mkinitcpio.conf.d/10-hooks.conf", &hooks_line(cfg));
-    }
-    if let Some((dev, true)) = &cfg.swap {
-        write_file("/etc/mkinitcpio.conf.d/10-resume-device.conf",
-            &format!("RESUME=UUID={}\n", crate::steps::filesystems::root_uuid(dev)));
+        write_file("/etc/mkinitcpio.conf.d/10-hooks.conf", &hooks_line(cfg, hibernate));
     }
     if cfg.gpu.nvidia() {
         write_file("/etc/mkinitcpio.conf.d/10-nvidia.conf",
@@ -47,6 +43,10 @@ pub fn configure(cfg: &Config, root_dev: &str) {
     chroot(&["mkinitcpio", "-P"]);
     chroot(&["grub-install", "--target=x86_64-efi", "--efi-directory=/boot", "--bootloader-id=GRUB"]);
     chroot(&["grub-mkconfig", "-o", "/boot/grub/grub.cfg"]);
+    // the boot menu may be wrong, but a missing EFI entry is the machine that does not boot
+    if !crate::sys::exists(&format!("{}/boot/EFI/GRUB/grubx64.efi", crate::sys::MNT)) {
+        die("grub-install wrote nothing to the ESP, check /boot is really the EFI partition");
+    }
 
     users(cfg);
     services(cfg);
@@ -79,9 +79,9 @@ fn services(cfg: &Config) {
     }
 }
 
-fn hooks_line(cfg: &Config) -> String {
+fn hooks_line(cfg: &Config, hibernate: bool) -> String {
     let encrypt = if cfg.luks { "encrypt " } else { "" };
-    let resume = if matches!(&cfg.swap, Some((_, true))) { "resume " } else { "" };
+    let resume = if hibernate { "resume " } else { "" };
     format!(
         "HOOKS=(base udev autodetect microcode modconf kms keyboard keymap consolefont block {}{}filesystems fsck)\n",
         encrypt, resume
@@ -90,8 +90,8 @@ fn hooks_line(cfg: &Config) -> String {
 
 fn grub_default(cfg: &Config, root_uuid: &str) -> String {
     let mut cmdline = String::from("loglevel=3 quiet rw");
-    let rootflags = if cfg.fs.has_subvolumes() { " rootflags=subvol=@" } else { "" };
-    let fstype = format!(" rootfstype={}", cfg.fs.rootfstype());
+    let rootflags = if cfg.fs.is_btrfs() { " rootflags=subvol=@" } else { "" };
+    let fstype = format!(" rootfstype={}", cfg.fs.key());
     if cfg.luks {
         cmdline.push_str(&format!(
             " cryptdevice=UUID={}:{} root=/dev/mapper/{}{}{}",
@@ -104,13 +104,61 @@ fn grub_default(cfg: &Config, root_uuid: &str) -> String {
     if cfg.gpu.nvidia() {
         cmdline.push_str(" nvidia_drm.modeset=1 nvidia.NVreg_PreserveVideoMemoryAllocations=1");
     }
-    if let Some((dev, true)) = &cfg.swap {
-        cmdline.push_str(&format!(" resume=UUID={}", crate::steps::filesystems::root_uuid(dev)));
-    }
     format!(
         "GRUB_DEFAULT=0\nGRUB_TIMEOUT=3\nGRUB_DISTRIBUTOR=\"Arch\"\n\
          GRUB_CMDLINE_LINUX_DEFAULT=\"{}\"\nGRUB_CMDLINE_LINUX=\"\"\n\
          GRUB_TERMINAL=console\nGRUB_DISABLE_OS_PROBER=false\n",
         cmdline
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{grub_default, hooks_line};
+    use crate::config::Config;
+    use crate::{detect, fs};
+
+    fn cfg(f: fs::Fs, luks: bool) -> Config {
+        Config {
+            disk: "/dev/sda".into(),
+            dual: false,
+            esp_part: None,
+            parts: Vec::new(),
+            luks,
+            multilib: false,
+            fs: f,
+            gpu: detect::Gpu::Virt,
+            hostname: "host".into(),
+            tz: "UTC".into(),
+            keymap: "us".into(),
+            locale: "en_US".into(),
+            user: "user".into(),
+            shell: "/bin/bash".into(),
+            luks_pass: String::new(),
+            user_pass: String::new(),
+            root_pass: String::new(),
+            packages: Vec::new(),
+            hibernate: false,
+        }
+    }
+
+    /// A wrong word here is an unbootable system, so pin the xfs and btrfs shapes.
+    #[test]
+    fn grub_line_matches_the_filesystem() {
+        let xfs = grub_default(&cfg(fs::Fs::Xfs, false), "1111");
+        assert!(xfs.contains("root=UUID=1111 rootfstype=xfs"));
+        assert!(!xfs.contains("rootflags="));
+        let btrfs = grub_default(&cfg(fs::Fs::Btrfs, false), "1111");
+        assert!(btrfs.contains("rootfstype=btrfs rootflags=subvol=@"));
+        let luks = grub_default(&cfg(fs::Fs::Ext4, true), "1111");
+        assert!(luks.contains("cryptdevice=UUID=1111:root root=/dev/mapper/root rootfstype=ext4"));
+    }
+
+    /// encrypt unlocks the device, resume must come after it or the swap is not readable yet.
+    #[test]
+    fn hooks_put_encrypt_before_resume() {
+        let hooks = hooks_line(&cfg(fs::Fs::Btrfs, true), true);
+        let (enc, res) = (hooks.find("encrypt").unwrap(), hooks.find("resume").unwrap());
+        assert!(enc < res, "{}", hooks);
+    }
 }

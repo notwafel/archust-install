@@ -4,12 +4,23 @@ use crate::layout::{Part, Role};
 use crate::sys::{out, run};
 use crate::ui::die;
 
-/// The disk the running live ISO booted from; installing there would destroy the run itself.
-pub fn is_live_disk(dev: &str) -> bool {
+/// Name of the disk the ISO boots from, e.g. `sdb`. Never offered in the picker.
+fn boot_disk() -> Option<String> {
     let booted = out("lsblk", &["-no", "PKNAME", "/run/archiso/bootmnt"])
         .or_else(|| out("lsblk", &["-no", "PKNAME", "-J", "/dev/disk/by-label/ARCH"]))
         .unwrap_or_default();
-    !booted.is_empty() && booted.lines().any(|l| l.trim() == dev.trim_start_matches("/dev/"))
+    booted.lines().map(|l| l.trim().to_string()).find(|l| !l.is_empty())
+}
+
+/// Whole disks, ready for the `Select` picker. The live ISO's own disk is left out.
+pub fn disks() -> Vec<String> {
+    let live = boot_disk();
+    out("lsblk", &["-dpno", "NAME"])
+        .unwrap_or_default()
+        .lines()
+        .map(|l| l.split_whitespace().next().unwrap_or("").to_string())
+        .filter(|d| !d.is_empty() && live.as_deref() != Some(d.as_str()))
+        .collect()
 }
 
 /// `PARTED`-style listing for the summary before asking whether to keep it.
@@ -17,11 +28,10 @@ pub fn table(disk: &str) -> String {
     out("parted", &["-sm", disk, "unit", "MiB", "print"]).unwrap_or_default()
 }
 
-/// Unpartitioned space after the last partition, in MiB.
-pub fn free_mib(disk: &str) -> u64 {
-    let total = size_mib(disk);
+/// Unpartitioned space after the last partition, in MiB, for a known disk size.
+pub fn free_mib(disk: &str, total_mib: u64) -> u64 {
     let used = free_start(disk);
-    if used >= total { 0 } else { total - used + 1 }
+    if used >= total_mib { 0 } else { total_mib - used + 1 }
 }
 
 pub fn dev_name(disk: &str, index: u32) -> String {
@@ -39,7 +49,8 @@ pub fn size_mib(dev: &str) -> u64 {
         / 1048576
 }
 
-pub fn list() -> String {
+/// Whole disks with size and model, for the summary line above the picker.
+pub fn disks_listing() -> String {
     out("lsblk", &["-dpno", "NAME,SIZE,MODEL"])
         .unwrap_or_default()
         .lines()
@@ -50,12 +61,6 @@ pub fn list() -> String {
 
 pub fn describe(disk: &str) -> String {
     out("lsblk", &["-o", "NAME,SIZE,FSTYPE,LABEL,MOUNTPOINT", disk]).unwrap_or_default()
-}
-
-pub fn is_whole_disk(dev: &str) -> bool {
-    dev.starts_with("/dev/")
-        && crate::sys::exists(dev)
-        && out("lsblk", &["-dpno", "TYPE", dev]).is_some_and(|t| t.trim() == "disk")
 }
 
 pub fn has_partitions(disk: &str) -> bool {
@@ -99,14 +104,13 @@ fn partition_count(disk: &str) -> u32 {
     partition_numbers(disk).len() as u32
 }
 
-/// Highest existing partition number, 0 when the disk is empty.
-pub fn last_number(disk: &str) -> u32 {
-    partition_numbers(disk).into_iter().max().unwrap_or(0)
-}
-
 /// Writes the plan to disk, returns the device path of each new partition.
 pub fn create(disk: &str, parts: &[Part], dual: bool, root_fs_hint: &str) -> Vec<String> {
     if !dual {
+        // the table is about to go; refuse while anything on the disk is still mounted
+        if out("findmnt", &["-S", disk]).is_some_and(|m| !m.trim().is_empty()) {
+            die(&format!("a partition of {} is mounted, unmount it first", disk));
+        }
         run("parted", &["-s", disk, "mklabel", "gpt"]);
     }
     let mut created = Vec::with_capacity(parts.len());
@@ -134,4 +138,9 @@ pub fn create(disk: &str, parts: &[Part], dual: bool, root_fs_hint: &str) -> Vec
         created.push(dev_name(disk, num));
     }
     created
+}
+
+/// Swap device and hibernation flag, read from the partitions that were just created.
+pub fn swap_device(parts: &[Part], devices: &[String], hibernate: bool) -> Option<(String, bool)> {
+    parts.iter().position(|p| p.role == Role::Swap).map(|i| (devices[i].clone(), hibernate))
 }

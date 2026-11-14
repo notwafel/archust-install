@@ -5,7 +5,7 @@ use crate::detect;
 use crate::disk;
 use crate::fs::{self, Fs};
 use crate::layout::{self, plan, Request};
-use crate::term::{ask, ask_name, ask_num, ask_yes, pick, pick_many};
+use crate::term::{ask, ask_name, ask_num, ask_yes, pick, pick_disk, pick_many};
 use crate::ui::{die, item, note, say, step, warn};
 
 const STEPS: usize = 8;
@@ -103,12 +103,6 @@ pub fn ask_everything() -> Config {
     let user_pass = crate::term::ask_pass("User password");
     let root_pass = crate::term::ask_pass("Root password");
 
-    let swap = layout_answers
-        .parts
-        .iter()
-        .find(|p| p.role == layout::Role::Swap)
-        .map(|p| (disk::dev_name(&disk, partition_index(&disk, &layout_answers.parts, p)), layout_answers.hibernate));
-
     let mut packages = BASE.to_vec();
     packages.extend(extras);
     packages.push(kernel);
@@ -158,7 +152,7 @@ pub fn ask_everything() -> Config {
         user_pass,
         root_pass,
         packages,
-        swap,
+        hibernate: layout_answers.hibernate,
     }
 }
 
@@ -168,15 +162,15 @@ fn ask_layout(disk: &str, total_mib: u64) -> Layout {
     let Keep { dual, esp_part, free_start, boot_mib } = if disk::has_partitions(disk) {
         note(&disk::table(disk));
         if ask_yes("Keep the existing partitions and install into the free space?", true) {
+            let free = disk::free_mib(disk, total_mib);
             match disk::existing_esp(disk) {
-                Some(esp) if disk::free_mib(disk) >= 16384 => {
+                Some(esp) if free >= 16384 => {
                     say(&format!("reusing {} as /boot", esp));
-                    item("free space", &format!("{} MiB", disk::free_mib(disk)));
+                    item("free space", &format!("{} MiB", free));
                     Keep { dual: true, esp_part: Some(esp), free_start: disk::free_start(disk), boot_mib: 0 }
                 }
                 Some(_) => {
-                    warn(&format!("only {} MiB free after the last partition, 16384 MiB needed",
-                        disk::free_mib(disk)));
+                    warn(&format!("only {} MiB free after the last partition, 16384 MiB needed", free));
                     wipe(disk)
                 }
                 None => {
@@ -220,10 +214,10 @@ fn ask_layout(disk: &str, total_mib: u64) -> Layout {
     }
 }
 
-/// Wipe branch: confirmation, then a fresh EFI partition.
+/// Wipe branch: the disk name has to be typed back, then a fresh EFI partition.
 fn wipe(disk: &str) -> Keep {
     warn(&format!("This wipes ALL of {} - irreversible.", disk));
-    if !ask_yes("Confirm ERASE", false) {
+    if ask(&format!("Type {} to confirm", disk)) != disk {
         die("aborted");
     }
     wipe_esp()
@@ -248,13 +242,6 @@ fn shell_package(shell: &str) -> Option<&'static str> {
     }
 }
 
-/// 1-based partition number: 1 is the ESP on a wiped disk, otherwise the last existing + offset.
-fn partition_index(disk: &str, parts: &[layout::Part], part: &layout::Part) -> u32 {
-    let position = parts.iter().position(|p| p.start == part.start).unwrap_or(0) + 1;
-    let base = if disk::has_partitions(disk) { disk::last_number(disk) } else { 0 };
-    base + position as u32
-}
-
 fn pick_zone() -> String {
     let answer = pick("Timezone", &ZONES, 0).to_string();
     let path = format!("/usr/share/zoneinfo/{}", answer);
@@ -268,19 +255,14 @@ fn pick_zone() -> String {
 
 fn ask_disk() -> String {
     step(1, STEPS, "Disk");
-    note(&disk::list());
-    loop {
-        let d = ask("Install disk (e.g. /dev/nvme0n1)", "");
-        if disk::is_live_disk(&d) {
-            warn(&format!("{} holds the running live ISO, pick another disk", d));
-            continue;
-        }
-        if disk::is_whole_disk(&d) {
-            note(&disk::describe(&d));
-            return d;
-        }
-        warn(&format!("{} is not a whole disk", d));
+    let found = disk::disks();
+    if found.is_empty() {
+        die("no disks found besides the live ISO's own");
     }
+    note(&disk::disks_listing());
+    let disk = format!("/dev/{}", found[pick_disk(&found)]);
+    note(&disk::describe(&disk));
+    disk
 }
 
 fn show_plan(disk: &str, total_mib: u64, layout: &Layout, fs: Fs, luks: bool) {
@@ -298,7 +280,7 @@ fn show_plan(disk: &str, total_mib: u64, layout: &Layout, fs: Fs, luks: bool) {
             &format!("{} MiB {}{}", p.size(), if layout.dual { "at end of disk" } else { "new partition" }, extra),
         );
     }
-    if fs.has_subvolumes() {
+    if fs.is_btrfs() {
         item("subvolumes", &fs::SUBVOLS.join(" "));
     } else {
         item("subvolumes", "none, single root filesystem");

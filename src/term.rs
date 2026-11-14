@@ -9,16 +9,24 @@ fn finish<T>(r: dialoguer::Result<T>) -> T {
     r.unwrap_or_else(|e| die(&format!("input aborted: {}", e)))
 }
 
-pub fn ask(name: &str, default: &str) -> String {
+pub fn ask(name: &str) -> String {
     finish(
         Input::<String>::new()
             .with_prompt(name)
-            .default(default.to_string())
             .validate_with(|s: &String| -> Result<(), &str> {
-                if s.trim().is_empty() { Err("cannot be empty") } else { Ok(()) }
+                let s = s.trim();
+                if s.is_empty() {
+                    Err("required")
+                } else if !s.starts_with("/dev/") {
+                    Err("must be a path like /dev/sda")
+                } else {
+                    Ok(())
+                }
             })
             .interact_text(),
     )
+    .trim()
+    .to_string()
 }
 
 /// Lowercase letters, digits, `-` and `_`, 1-31 chars: valid both as a hostname and as a
@@ -81,12 +89,21 @@ pub fn pick_many<T: Clone + std::fmt::Display>(name: &str, items: &[T], checked:
     picks.into_iter().map(|i| items[i].clone()).collect()
 }
 
-/// Hidden input, asked twice; mismatch or empty just asks again.
+/// Picks one disk from `lsblk`; returns its name, e.g. `sda` or `nvme0n1`.
+pub fn pick_disk(disks: &[String]) -> usize {
+    let labels: Vec<String> = disks.iter().map(|d| format!("/dev/{}", d)).collect();
+    if labels.is_empty() {
+        die("no disks found");
+    }
+    finish(Select::new().with_prompt("Install disk").items(&labels).default(0).interact())
+}
+
+/// Hidden input, asked twice; empty, short or mismatched just asks again.
 pub fn ask_pass(name: &str) -> String {
     loop {
         let a = finish(Password::new().with_prompt(name).interact());
-        if a.is_empty() {
-            warn("password cannot be empty, type it again");
+        if a.len() < 8 {
+            warn("password needs at least 8 characters, type it again");
             continue;
         }
         let b = finish(Password::new().with_prompt("repeat").interact());

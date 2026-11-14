@@ -1,12 +1,16 @@
 <div align="center">
 
-![Archust Install](assets/banner-dark.svg#gh-dark-mode-only)
-![Archust Install](assets/banner-light.svg#gh-light-mode-only)
+<picture>
+  <source media="(prefers-color-scheme: light)" srcset="assets/banner-light.svg">
+  <img src="assets/banner-dark.svg" alt="Archust Install" width="900">
+</picture>
 
-![UEFI + GPT, btrfs / ext4 / xfs, LUKS2, GRUB, Wayland, NVIDIA / AMD / Intel](assets/features-dark.svg#gh-dark-mode-only)
-![UEFI + GPT, btrfs / ext4 / xfs, LUKS2, GRUB, Wayland, NVIDIA / AMD / Intel](assets/features-light.svg#gh-light-mode-only)
+<picture>
+  <source media="(prefers-color-scheme: light)" srcset="assets/features-light.svg">
+  <img src="assets/features-dark.svg" alt="UEFI and GPT, btrfs, ext4 and xfs, LUKS2, GRUB, Wayland, NVIDIA, AMD, Intel" width="900">
+</picture>
 
-[Run](#run) · [Controls](#controls) · [Questions](#questions) · [What it builds](#what-it-builds) · [Self-check](#self-check) · [Limits](#limits)
+[Run](#run) · [Header](#header) · [Questions](#questions) · [What it builds](#what-it-builds) · [Recovery](#recovery) · [Limits](#limits)
 
 </div>
 
@@ -17,8 +21,10 @@ Arch installer for the live ISO, written in Rust. No `archinstall` - it partitio
 > [!WARNING]
 > **Not tested on real hardware.** The TUI and the install path have not run on a live ISO yet. Try it in a VM first.
 
-![Pipeline: partition, format, LUKS, mount, pacstrap and fstab, configure](assets/pipeline-dark.svg#gh-dark-mode-only)
-![Pipeline: partition, format, LUKS, mount, pacstrap and fstab, configure](assets/pipeline-light.svg#gh-light-mode-only)
+<picture>
+  <source media="(prefers-color-scheme: light)" srcset="assets/pipeline-light.svg">
+  <img src="assets/pipeline-dark.svg" alt="Install pipeline: partition, format, LUKS, mount, pacstrap and fstab, configure." width="900">
+</picture>
 
 ## Run
 
@@ -31,16 +37,24 @@ mount -o remount,size=4G /run/archiso/cowspace   # live ISO ships a tiny copy-on
 ./archust_install.sh
 ```
 
-`rust` and `git` are on the live ISO already, so that `pacman -S` does nothing. Never run
-`pacman -Sy` or `pacman -Syu` on the live ISO to get them: the booted system lives in a small
-tmpfs, a full upgrade overflows it and leaves pacman unable to commit anything.
-The installer grows the layer itself if it finds less than 2 GiB free.
+`rust` and `git` are on the live ISO already, so that `pacman -S` does nothing. The installer
+never runs `pacman -Syu` on the live ISO: the booted system lives in a small tmpfs and a full
+upgrade overflows it. It grows the layer itself if it finds less than 2 GiB free.
 
 `archust_install.sh` is a tiny launcher: it runs `cargo build --release --locked` (only when the sources changed) and then execs the binary. `--locked` means the build never re-resolves dependencies, so it works on a fresh ISO without network access to crates.io.
 
-## Controls
+## Header
 
-Arrow keys / `j` `k` to move, Enter to accept, space toggles in multi-select lists, `Esc` / `Ctrl-C` aborts. Nothing else throws you out: a wrong answer is re-asked - empty hostname or username, mismatched passwords, disk that is not a whole disk, filesystem too small for the plan.
+Every run shows the same eight numbered sections, so you always know where you are in the list.
+
+```
+[2/8] Partitioning
+--------------------------------------------------------------
+!!! This wipes ALL of /dev/nvme0n1 - irreversible.
+Type /dev/nvme0n1 to confirm:
+```
+
+Arrow keys / `j` `k` to move, Enter to accept, space toggles in multi-select lists, `Esc` / `Ctrl-C` aborts. Nothing else throws you out: a wrong answer is re-asked - empty hostname or username, mismatched or short passwords, a disk that is not a whole disk, a filesystem too small for the plan.
 
 ## Questions
 
@@ -49,23 +63,27 @@ never fatal.
 
 | step | section | what | default |
 |---|---|---|---|
-| 1 | Disk | pick a whole disk from `lsblk`; the live ISO's own disk is refused | - |
+| 1 | Disk | pick a whole disk from a list; the live ISO's own disk is not in it | first disk |
 | 2 | Partitioning | keep existing partitions and install into the free space, or wipe | keep, if free space >= 16 GiB |
 | 3 | Sizes | swap GiB, root GiB (0 = rest), EFI size when wiping | 4, 0, 1024 MiB |
 | 4 | Filesystem and encryption | btrfs / ext4 / xfs, LUKS, then the plan | btrfs, no LUKS |
 | 5 | Hardware | kernel, GPU driver | linux, detected |
 | 6 | Packages | multilib, Wayland stack, extra groups | all on |
 | 7 | System | hostname, username, timezone, keymap, locale, shell | none, none, UTC, us, en_US, bash |
-| 8 | Passwords | LUKS passphrase (only with LUKS), user, root | typed twice |
+| 8 | Passwords | LUKS passphrase (only with LUKS), user, root | 8 characters, typed twice |
 
 Hibernation is asked right after the sizes and only when swap is at least as large as RAM.
+
+Wiping is the one question that cannot be answered by pressing Enter: the disk name has to be
+typed back. Before the partition table is replaced the installer also refuses a disk with any
+mounted partition.
 
 ## What it builds
 
 - GPT, UEFI only. Full wipe or dualboot (existing EFI partition reused as `/boot`, new partitions appended after the last one).
-- Root filesystem: **btrfs** (subvolumes `@`, `@home`, `@log`, `@pkg`, `@snapshots`, `@swp`, `noatime,compress=zstd:1`), **ext4** or **xfs** (single root, `noatime`). Subvolumes only exist on btrfs; the GRUB line follows the choice (`rootfstype=`).
+- Root filesystem: **btrfs** (subvolumes `@`, `@home`, `@log`, `@pkg`, `@snapshots`, `@swp`, `noatime,compress=zstd:1`), **ext4** or **xfs** (single root, `noatime`). Subvolumes only exist on btrfs; the GRUB line follows the choice (`rootfstype=`, `rootflags=subvol=@` on btrfs only).
 - Optional **LUKS2** on the root partition: AES-XTS-plain64, 512-bit key, SHA-512, Argon2id. `encrypt` hook goes into the initramfs, one passphrase unlocks root at boot. The passphrase reaches `cryptsetup` on stdin, never on the command line.
-- **GRUB** (EFI, `--target=x86_64-efi`) with `GRUB_TERMINAL=console`, `GRUB_TIMEOUT=3`, `loglevel=3 quiet rw`, `os-prober` enabled.
+- **GRUB** (EFI, `--target=x86_64-efi`) with `GRUB_TERMINAL=console`, `GRUB_TIMEOUT=3`, `loglevel=3 quiet rw`, `os-prober` enabled. The install stops if `grub-install` wrote nothing to the ESP.
 - Nvidia: `nvidia_drm.modeset=1`, `nvidia.NVReg_PreserveVideoMemoryAllocations=1` on the kernel command line, modules in the initramfs, `systemd-udevd` with `PrivateMounts=no`.
 - `systemd-timesyncd` + NetworkManager enabled. Bluetooth is not installed.
 
@@ -95,6 +113,10 @@ mesa vulkan-icd-loader libva-utils
 nano, curl, git, flatpak, pipewire, man-db, graphics and firmware are group choices, and so is
 the login shell (`zsh` or `fish` is installed only when picked). Untick a group and its packages are not installed. With the Wayland answer on, `pacman -S gnome` (or `plasma`, `sway`, ...) works right away.
 
+The installer checks `linux-firmware-intel`, `linux-firmware-realtek` and
+`linux-firmware-nvidia` against the repository database before it touches the disk, so a renamed
+package stops the run instead of failing inside `pacstrap` at the very end.
+
 </details>
 
 No desktop environment, no browser, no compositor. Archust Install stops at a system that is ready for one.
@@ -104,17 +126,34 @@ No desktop environment, no browser, no compositor. Archust Install stops at a sy
 - `/etc/sysctl.d/80-gamecompatibility.conf`: `vm.max_map_count = 2147483642` (Proton/Wine/DXVK
   need it) and `vm.swappiness = 10` (Arch defaults to 60, which pushes RAM to swap too early),
   applied with `sysctl --system` during the install.
-- Hibernation: `resume` hook, `RESUME=UUID=` and `resume=UUID=` on the kernel command line -
-  written only when swap is at least as large as RAM and the question was answered yes.
+- Hibernation: `resume` hook, `RESUME=UUID=` in the initramfs and `resume=UUID=` added to the
+  GRUB line through `/etc/default/grub.d/10-resume.cfg`. Written only when swap is at least as
+  large as RAM and the question was answered yes. The swap partition is activated right after
+  `mkswap`, so `genfstab` picks it up.
 - `fstrim.timer` enabled, so SSD TRIM actually runs.
 - `/etc/sysctl.d/99-no-core-dumps.conf`: `kernel.core_pattern = |/bin/false` - a crash writes no multi-GB dump to disk.
-- multilib: `[multilib]` uncommented in `/etc/pacman.conf`, on the installed system and on the live ISO (so pacstrap can pull the `lib32-*` packages).
+- multilib: `[multilib]` uncommented in `/etc/pacman.conf`, on the installed system and on the live ISO (so pacstrap can pull the `lib32-*` packages). The target copy is read back and the install stops if it is still commented out.
 - GRUB: `loglevel=3 quiet rw`, `GRUB_TIMEOUT=3`, console terminal.
 - `%wheel` gets sudo through `/etc/sudoers.d/10-wheel`.
 - Mirrors: `reflector` picks 10 fastest HTTPS mirrors from trusted countries before anything
-  else runs. With the `reflector` group pre-ticked, the same config is written to
-  `/etc/xdg/reflector/reflector.conf` and `reflector.timer` is enabled, so the mirrorlist stays
-  fresh after install.
+  else runs. Same settings once, written as `/etc/xdg/reflector/reflector.conf` and passed as
+  flags: reflector has no `--config`. With the `reflector` group pre-ticked, the config is
+  written into the target and `reflector.timer` is enabled, so the mirrorlist stays fresh.
+
+## Recovery
+
+A failed run leaves `/mnt` mounted, swap active and partitions written. Clean up before trying
+again, or the installer starts on a dirty `/mnt`:
+
+```sh
+swapoff -a
+umount -R /mnt
+cryptsetup close root          # only with LUKS
+./archust_install.sh
+```
+
+Nothing on the disk is rolled back - a rerun formats again, and a wipe starts from an empty
+partition table.
 
 <details>
 <summary><b>Layout of the code</b></summary>
@@ -124,23 +163,24 @@ No desktop environment, no browser, no compositor. Archust Install stops at a sy
 ```
 src/main.rs              entry point: --check / --help / run()
 src/config.rs            everything the user answered
-src/prompt.rs            question flow (disk → sizes → fs → LUKS → kernel → GPU → …)
-src/term.rs              dialoguer prompts: select, multi-select, input, password
-src/ui.rs                say / warn / die / note
-src/sys.rs               shell wrappers, live-ISO check, mirrors
-src/disk.rs              lsblk/parted: list disks, free space, ESP, mkpart
+src/prompt.rs            question flow (disk -> sizes -> fs -> LUKS -> kernel -> GPU -> ...)
+src/term.rs              dialoguer prompts: select, disk picker, multi-select, input, password
+src/ui.rs                say / warn / die / note / step / rule / item
+src/sys.rs               shell wrappers, live-ISO check, mirrors, keys
+src/disk.rs              lsblk/parted: disk list, free space, ESP, findmnt guard, mkpart
 src/detect.rs            GPU family and CPU microcode
 src/layout.rs            partition arithmetic (pure, self-tested)
-src/fs.rs                btrfs / ext4 / xfs: mkfs, mount options, rootfstype
+src/fs.rs                btrfs / ext4 / xfs: mkfs, mount options
 src/steps/
     mod.rs               the pipeline, in order
-    filesystems.rs       mkfs per fs type, btrfs subvolumes, mounts, root UUID
+    filesystems.rs       mkfs, btrfs subvolumes, swap on, mounts, root UUID
     luks.rs              cryptsetup
-    pacstrap.rs          multilib, pacstrap, fstab
+    pacstrap.rs          multilib, pacstrap, fstab, resume config
     configure.rs         locale, hostname, GRUB, initramfs, sysctl, users, services
+assets/                  banners and diagrams, dark and light
 ```
 
-Pipeline: partition → format → LUKS → mount → pacstrap + fstab → configure.
+Pipeline: partition -> format -> LUKS -> mount -> pacstrap + fstab -> configure.
 
 </details>
 
@@ -150,7 +190,7 @@ Pipeline: partition → format → LUKS → mount → pacstrap + fstab → confi
 ./archust_install.sh --check
 ```
 
-Runs the partition arithmetic on fixed cases (wipe, dualboot, swap, fixed root) and rejection cases (oversized root, tiny disk, EFI under 300 MiB). Fails on overlap, overflow, or a plan that does not end with root. `cargo test` covers the `[multilib]` uncommenting.
+Runs the partition arithmetic on fixed cases (wipe, dualboot, swap, fixed root) and rejection cases (oversized root, tiny disk, EFI under 300 MiB). Fails on overlap, overflow, or a plan that does not end with root. `cargo test` covers the kernel command line (xfs, btrfs, LUKS), the initramfs hook order, the `[multilib]` uncommenting and the two `reflector` renderings.
 
 ## Limits
 
@@ -159,8 +199,8 @@ Runs the partition arithmetic on fixed cases (wipe, dualboot, swap, fixed root) 
 - `nvidia-dkms` needs the `linux-headers` matching your kernel; `nvidia-open-dkms` needs Turing (RTX 20xx) or newer. Older cards: pick `nvidia-dkms`.
 - Dualboot needs an existing EFI partition and free space after the last one. No shrinking, no resizing of existing partitions.
 - Timezone, keymap and locale lists are short. The keymap list has `uk`, not `gb`.
-- No btrfs snapshot tool, no zram, no hibernation resume setup beyond the swap partition.
-- Small installer, not general-purpose. Run `--check` after any edit.
+- No btrfs snapshot tool, no zram, no encrypted swap.
+- Small installer, not general-purpose. Run `--check` and `cargo test` after any edit.
 
 <br>
 

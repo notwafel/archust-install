@@ -60,7 +60,7 @@ pub fn require_live_iso() {
     if !exists("/run/archiso") {
         die("run as root on the Arch live ISO");
     }
-    if !fs::read_to_string("/proc/self/status").unwrap_or_default().contains("Uid:\t0") {
+    if out("id", &["-u"]).as_deref() != Some("0\n") {
         die("run as root");
     }
 }
@@ -71,30 +71,30 @@ pub const REFLECT_COUNTRIES: &str =
      Estonia,Latvia,Lithuania,Romania,Bulgaria,Greece,United States,United Kingdom,Canada,\
      Australia,New Zealand,Japan";
 
+/// reflector settings, written once: the conf file and the command line both come from this.
+const REFLECT_FLAGS: [(&str, &str); 7] = [
+    ("--country", REFLECT_COUNTRIES),
+    ("--protocol", "https"),
+    ("--score", "100"),
+    ("--sort", "rate"),
+    ("--fastest", "10"),
+    ("--completion-percent", "100"),
+    ("--save", "/etc/pacman.d/mirrorlist"),
+];
+
 /// One flag per line, as `/etc/xdg/reflector/reflector.conf` expects.
 pub fn reflector_conf() -> String {
-    format!(
-        "--country {}\n--protocol https\n--score 100\n--sort rate\n--fastest 10\n--completion-percent 100\n--save /etc/pacman.d/mirrorlist\n",
-        REFLECT_COUNTRIES
-    )
+    let mut conf = String::new();
+    for (flag, value) in REFLECT_FLAGS {
+        conf.push_str(&format!("{} {}\n", flag, value));
+    }
+    conf
 }
 
 /// The same settings as a command line: reflector has no `--config`, only the systemd unit
 /// reads reflector.conf, so the installer has to pass the flags itself.
 fn reflector_args() -> Vec<String> {
-    let mut args = vec!["--country".to_string(), REFLECT_COUNTRIES.to_string()];
-    for (flag, value) in [
-        ("--protocol", "https"),
-        ("--score", "100"),
-        ("--sort", "rate"),
-        ("--fastest", "10"),
-        ("--completion-percent", "100"),
-        ("--save", "/etc/pacman.d/mirrorlist"),
-    ] {
-        args.push(flag.to_string());
-        args.push(value.to_string());
-    }
-    args
+    REFLECT_FLAGS.iter().flat_map(|(f, v)| [f.to_string(), v.to_string()]).collect()
 }
 
 /// 10 fastest HTTPS mirrors from trusted countries, then the keyring.
@@ -107,7 +107,14 @@ pub fn prepare_mirrors() {
         fs::create_dir_all(dir).ok();
     }
     fs::write(LIVE_CONF, reflector_conf()).unwrap_or_else(|e| die(&format!("cannot write {}: {}", LIVE_CONF, e)));
-    quiet("pacman", &["-Sy", "--noconfirm", "--needed", "reflector"]);
+    // keyring before any package, or reflector and the helpers fail on an old ISO signature
+    run("pacman-key", &["--init"]);
+    run("pacman", &["-Sy", "--needed", "--noconfirm", "archlinux-keyring"]);
+    run("pacman-key", &["--populate", "archlinux"]);
+    // no `pacman -Syu`: upgrading the running archiso replaces pacman and glibc inside its own
+    // tmpfs and leaves a half-upgraded live system; `-Sy` is enough to install helpers by name
+    run("pacman", &["-Sy", "--needed", "--noconfirm",
+        "reflector", "btrfs-progs", "gptfdisk", "dosfstools", "cryptsetup"]);
     let args = reflector_args();
     let refs: Vec<&str> = args.iter().map(String::as_str).collect();
     run("reflector", &refs);
@@ -119,16 +126,14 @@ pub fn prepare_mirrors() {
     if n != 10 {
         die(&format!("expected 10 mirrors, got {}", n));
     }
-    // the ISO database can be months old and `-Sy` after a partial refresh breaks deps, so a
-    // full upgrade is the only safe refresh; cowspace is what makes it fit
-    if !quiet_ok("pacman", &["-Syu", "--noconfirm"]) {
-        crate::ui::warn("pacman -Syu failed on the live ISO, trying a plain refresh");
-        quiet("pacman", &["-Syy", "--noconfirm"]);
+    // -Sp fails on a name the repos do not know, so a renamed package stops here and not
+    // inside pacstrap after the disk is already formatted
+    const FIRMWARE: [&str; 3] = ["linux-firmware-intel", "linux-firmware-realtek", "linux-firmware-nvidia"];
+    let mut package_args = vec!["-Sp", "--needed", "--noconfirm"];
+    package_args.extend(FIRMWARE);
+    if out("pacman", &package_args).is_none() {
+        die(&format!("not in the repos: {}", FIRMWARE.join(" ")));
     }
-    quiet("pacman", &["-Sy", "--noconfirm", "--needed",
-        "archlinux-keyring", "btrfs-progs", "gptfdisk", "dosfstools", "cryptsetup"]);
-    quiet("pacman-key", &["--init"]);
-    quiet("pacman-key", &["--populate", "archlinux"]);
 }
 
 /// remounts the archiso copy-on-write layer bigger; `pacstrap` alone needs a few GB there
@@ -137,8 +142,8 @@ pub fn grow_cowspace() {
     if !exists(COWSPACE) {
         return;
     }
-    let avail = out("df", &["-BK", "--output=avail", COWSPACE])
-        .and_then(|s| s.lines().nth(1).map(|v| v.trim().trim_end_matches('K').to_string()))
+    let avail = out("df", &["-B1", "--output=avail", COWSPACE])
+        .and_then(|s| s.lines().nth(1).map(|v| v.trim().to_string()))
         .and_then(|v| v.parse::<u64>().ok())
         .unwrap_or(0);
     if avail >= 2 * 1024 * 1024 {

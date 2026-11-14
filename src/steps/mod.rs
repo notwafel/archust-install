@@ -12,6 +12,8 @@ use crate::ui::say;
 pub fn install(cfg: &Config) {
     say("Partitioning");
     let devices = disk::create(&cfg.disk, &cfg.parts, cfg.dual, cfg.fs.key());
+    // the device paths only exist now; guessing them from the plan put resume= on the root
+    let swap = disk::swap_device(&cfg.parts, &devices, cfg.hibernate);
 
     let fs = filesystems::format(cfg, &devices);
     let root = if cfg.luks {
@@ -20,6 +22,6 @@ pub fn install(cfg: &Config) {
         fs.root_raw.clone()
     };
     filesystems::mount(cfg, &fs, &root);
-    pacstrap::base(cfg);
-    configure::configure(cfg, &root);
+    pacstrap::base(cfg, &swap);
+    configure::configure(cfg, &root, &swap);
 }

@@ -12,7 +12,8 @@ impl Fs {
         }
     }
 
-    pub fn has_subvolumes(self) -> bool { self == Fs::Btrfs }
+    /// Subvolumes only make sense on btrfs. The only real difference between the three here.
+    pub fn is_btrfs(self) -> bool { self == Fs::Btrfs }
 
     pub fn mkfs(self, dev: &str) {
         match self {
@@ -27,15 +28,6 @@ impl Fs {
             Fs::Btrfs => "noatime,compress=zstd:1",
             Fs::Ext4 => "noatime",
             Fs::Xfs => "noatime",
-        }
-    }
-
-    /// Kernel `rootfstype=` for the GRUB command line.
-    pub fn rootfstype(self) -> &'static str {
-        match self {
-            Fs::Btrfs => "btrfs",
-            Fs::Ext4 => "ext4",
-            Fs::Xfs => "xfs",
         }
     }
 }
