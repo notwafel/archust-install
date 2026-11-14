@@ -15,7 +15,7 @@ fn boot_disk() -> Option<String> {
 /// Whole disks, ready for the `Select` picker. The live ISO's own disk is left out.
 pub fn disks() -> Vec<String> {
     let live = boot_disk();
-    out("lsblk", &["-dpno", "NAME"])
+    out("lsblk", &["-dno", "NAME"])
         .unwrap_or_default()
         .lines()
         .map(|l| l.split_whitespace().next().unwrap_or("").to_string())

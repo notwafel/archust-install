@@ -199,10 +199,11 @@ No desktop environment, no browser, no compositor. Archust Install stops at a sy
 - multilib: `[multilib]` uncommented in `/etc/pacman.conf`, on the installed system and on the live ISO (so pacstrap can pull the `lib32-*` packages). The target copy is read back and the install stops if it is still commented out.
 - GRUB: `loglevel=3 quiet rw`, `GRUB_TIMEOUT=3`, console terminal.
 - `%wheel` gets sudo through `/etc/sudoers.d/10-wheel`.
-- Mirrors: `reflector` picks 10 fastest HTTPS mirrors from trusted countries before anything
-  else runs. One setting table renders `/etc/xdg/reflector/reflector.conf` and its command-line
-  flags; reflector has no `--config`. When the optional `reflector` group is selected, the config
-  is written into the target and the installer attempts to enable `reflector.timer`.
+- Mirrors: `reflector` selects the 10 latest HTTPS mirrors from trusted countries and sorts them
+  by rate before anything else runs. One setting table renders
+  `/etc/xdg/reflector/reflector.conf` and its command-line flags; reflector has no `--config`.
+  When the optional `reflector` group is selected, the config is written into the target and the
+  installer attempts to enable `reflector.timer`.
 
 </details>
 

@@ -72,13 +72,11 @@ pub const REFLECT_COUNTRIES: &str =
      Australia,New Zealand,Japan";
 
 /// reflector settings, written once: the conf file and the command line both come from this.
-const REFLECT_FLAGS: [(&str, &str); 7] = [
+const REFLECT_FLAGS: [(&str, &str); 5] = [
     ("--country", REFLECT_COUNTRIES),
     ("--protocol", "https"),
-    ("--score", "100"),
+    ("--latest", "10"),
     ("--sort", "rate"),
-    ("--fastest", "10"),
-    ("--completion-percent", "100"),
     ("--save", "/etc/pacman.d/mirrorlist"),
 ];
 
@@ -97,9 +95,9 @@ fn reflector_args() -> Vec<String> {
     REFLECT_FLAGS.iter().flat_map(|(f, v)| [f.to_string(), v.to_string()]).collect()
 }
 
-/// 10 fastest HTTPS mirrors from trusted countries, then the keyring.
+/// HTTPS mirrors from trusted countries, then the helper packages and refreshed keyring.
 pub fn prepare_mirrors() {
-    crate::ui::say("Mirrors: HTTPS, 10 fastest from trusted countries");
+    crate::ui::say("Mirrors: 10 latest HTTPS mirrors from trusted countries, sorted by rate");
     // live writes go to a tmpfs sized at boot; a full install needs far more than the default
     grow_cowspace();
     const LIVE_CONF: &str = "/etc/xdg/reflector/reflector.conf";
@@ -113,8 +111,7 @@ pub fn prepare_mirrors() {
     run("pacman-key", &["--populate", "archlinux"]);
     // no `pacman -Syu`: upgrading the running archiso replaces pacman and glibc inside its own
     // tmpfs and leaves a half-upgraded live system; `-Sy` is enough to install helpers by name
-    run("pacman", &["-Sy", "--needed", "--noconfirm",
-        "reflector", "btrfs-progs", "gptfdisk", "dosfstools", "cryptsetup"]);
+    run("pacman", &["-Sy", "--needed", "--noconfirm", "reflector"]);
     let args = reflector_args();
     let refs: Vec<&str> = args.iter().map(String::as_str).collect();
     run("reflector", &refs);
@@ -123,9 +120,13 @@ pub fn prepare_mirrors() {
         .lines()
         .filter(|l| l.starts_with("Server = https://"))
         .count();
-    if n != 10 {
-        die(&format!("expected 10 mirrors, got {}", n));
+    if n == 0 {
+        die("reflector wrote no HTTPS mirrors");
     }
+    run("pacman", &["-Sy", "--needed", "--noconfirm",
+        "btrfs-progs", "gptfdisk", "dosfstools", "cryptsetup"]);
+    run("pacman", &["-Sy", "--needed", "--noconfirm", "archlinux-keyring"]);
+    run("pacman-key", &["--populate", "archlinux"]);
     // -Sp fails on a name the repos do not know, so a renamed package stops here and not
     // inside pacstrap after the disk is already formatted
     const FIRMWARE: [&str; 3] = ["linux-firmware-intel", "linux-firmware-realtek", "linux-firmware-nvidia"];
@@ -177,7 +178,7 @@ mod tests {
             assert!(line.starts_with("--"), "not a flag line: {:?}", line);
             assert_eq!(line.matches("--").count(), 1, "two flags on one line: {:?}", line);
         }
-        assert!(conf.lines().count() >= 6);
+        assert_eq!(conf.lines().count(), 5);
     }
 
     /// The command line must carry the same settings; reflector rejects `--config`.
@@ -185,8 +186,11 @@ mod tests {
     fn reflector_args_match_the_conf() {
         let args = reflector_args();
         assert!(!args.iter().any(|a| a == "--config"));
-        for flag in ["--country", "--protocol", "--score", "--sort", "--fastest", "--save"] {
+        for flag in ["--country", "--protocol", "--latest", "--sort", "--save"] {
             assert!(args.iter().any(|a| a == flag), "missing {}", flag);
+        }
+        for removed in ["--score", "--fastest", "--completion-percent"] {
+            assert!(!args.iter().any(|a| a == removed), "unexpected {}", removed);
         }
         assert_eq!(args[0], "--country");
         assert_eq!(args.len() % 2, 0, "every flag needs a value: {:?}", args);
