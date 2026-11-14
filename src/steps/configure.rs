@@ -1,0 +1,104 @@
+//! Step 5: locale, keymap, hostname, GRUB, initramfs, sysctl, users, services.
+
+use crate::config::Config;
+use crate::steps::luks;
+use crate::sys::{chroot, quiet, with_stdin, write_file};
+use crate::ui::say;
+
+pub fn configure(cfg: &Config, root_dev: &str) {
+    say("System configuration");
+
+    write_file("/etc/locale.gen", &format!("en_US.UTF-8 UTF-8\n{}.UTF-8 UTF-8\n", cfg.locale));
+    write_file("/etc/locale.conf", &format!("LANG={}.UTF-8\n", cfg.locale));
+    write_file("/etc/vconsole.conf", &format!("KEYMAP={}\n", cfg.keymap));
+    write_file("/etc/hostname", &format!("{}\n", cfg.hostname));
+    write_file("/etc/hosts", &format!(
+        "127.0.0.1 localhost\n::1 localhost\n127.0.1.1 {h}.localdomain {h}\n", h = cfg.hostname
+    ));
+
+    write_file("/etc/sysctl.d/80-gamecompatibility.conf",
+        "vm.max_map_count = 2147483642\nvm.swappiness = 10\n");
+    // 99- beats the 50- default, so core dumps never write to (possibly slow) disk
+    write_file("/etc/sysctl.d/99-no-core-dumps.conf", "kernel.core_pattern = |/bin/false\n");
+
+    let root_uuid = crate::steps::filesystems::root_uuid(root_dev);
+    write_file("/etc/default/grub", &grub_default(cfg, &root_uuid));
+
+    let hibernate = matches!(&cfg.swap, Some((_, true)));
+    if cfg.luks || hibernate {
+        // one HOOKS= only: a second drop-in would replace the first
+        write_file("/etc/mkinitcpio.conf.d/10-hooks.conf", &hooks_line(cfg));
+    }
+    if let Some((dev, true)) = &cfg.swap {
+        write_file("/etc/mkinitcpio.conf.d/10-resume-device.conf",
+            &format!("RESUME=UUID={}\n", crate::steps::filesystems::root_uuid(dev)));
+    }
+    if cfg.gpu.nvidia() {
+        write_file("/etc/mkinitcpio.conf.d/10-nvidia.conf",
+            "MODULES=(nvidia nvidia_modeset nvidia_uvm nvidia_drm)\n");
+        write_file("/etc/systemd/system/systemd-udevd.service.d/nvidia.conf",
+            "[Service]\nPrivateMounts=no\n");
+    }
+
+    chroot(&["ln", "-sf", &format!("/usr/share/zoneinfo/{}", cfg.tz), "/etc/localtime"]);
+    chroot(&["hwclock", "--systohc"]);
+    chroot(&["locale-gen"]);
+    chroot(&["sysctl", "--system"]);
+    chroot(&["mkinitcpio", "-P"]);
+    chroot(&["grub-install", "--target=x86_64-efi", "--efi-directory=/boot", "--bootloader-id=GRUB"]);
+    chroot(&["grub-mkconfig", "-o", "/boot/grub/grub.cfg"]);
+
+    users(cfg);
+}
+
+fn users(cfg: &Config) {
+    say("Users and services");
+    quiet("arch-chroot", &[crate::sys::MNT, "useradd", "-m", "-G", "wheel", "-s", &cfg.shell, &cfg.user]);
+    with_stdin(&format!("{}:{}\n", cfg.user, cfg.user_pass), "arch-chroot", &[crate::sys::MNT, "chpasswd"]);
+    with_stdin(&format!("root:{}\n", cfg.root_pass), "arch-chroot", &[crate::sys::MNT, "chpasswd"]);
+    write_file("/etc/sudoers.d/10-wheel", "%wheel ALL=(ALL:ALL) ALL\n");
+    quiet("chmod", &["440", &format!("{}/etc/sudoers.d/10-wheel", crate::sys::MNT)]);
+    quiet("chmod", &["700", &format!("{}/root", crate::sys::MNT)]);
+    chroot(&["systemctl", "enable", "NetworkManager", "systemd-timesyncd", "fstrim.timer"]);
+    // the mirrorlist came from the ISO; keep it fresh when reflector is installed
+    if cfg.packages.contains(&"reflector") {
+        write_file("/etc/xdg/reflector/reflector.conf", &crate::sys::reflector_conf());
+        quiet("arch-chroot", &[crate::sys::MNT, "systemctl", "enable", "reflector.timer"]);
+    }
+}
+
+fn hooks_line(cfg: &Config) -> String {
+    let encrypt = if cfg.luks { "encrypt " } else { "" };
+    let resume = if matches!(&cfg.swap, Some((_, true))) { "resume " } else { "" };
+    format!(
+        "HOOKS=(base udev autodetect microcode modconf kms keyboard keymap consolefont block {}{}filesystems fsck)\n",
+        encrypt, resume
+    )
+}
+
+fn grub_default(cfg: &Config, root_uuid: &str) -> String {
+    let mut cmdline = String::from("loglevel=3 quiet rw");
+    let rootflags = if cfg.fs.has_subvolumes() { " rootflags=subvol=@" } else { "" };
+    let fstype = format!(" rootfstype={}", cfg.fs.rootfstype());
+    if cfg.luks {
+        cmdline.push_str(&format!(
+            " cryptdevice=UUID={}:{} root=/dev/mapper/{}{}{}",
+            root_uuid, luks::MAPPER, luks::MAPPER, fstype, rootflags
+        ));
+    } else {
+        cmdline.push_str(&format!(" root=UUID={}{}{}", root_uuid, fstype, rootflags));
+    }
+
+    if cfg.gpu.nvidia() {
+        cmdline.push_str(" nvidia_drm.modeset=1 nvidia.NVreg_PreserveVideoMemoryAllocations=1");
+    }
+    if let Some((dev, true)) = &cfg.swap {
+        cmdline.push_str(&format!(" resume=UUID={}", crate::steps::filesystems::root_uuid(dev)));
+    }
+    format!(
+        "GRUB_DEFAULT=0\nGRUB_TIMEOUT=3\nGRUB_DISTRIBUTOR=\"Arch\"\n\
+         GRUB_CMDLINE_LINUX_DEFAULT=\"{}\"\nGRUB_CMDLINE_LINUX=\"\"\n\
+         GRUB_TERMINAL=console\nGRUB_DISABLE_OS_PROBER=false\n",
+        cmdline
+    )
+}
