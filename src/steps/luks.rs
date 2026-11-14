@@ -22,6 +22,7 @@ pub fn encrypt(dev: &str, pass: &str) -> String {
     let mut format_args = vec!["luksFormat"];
     format_args.extend_from_slice(&ARGS);
     format_args.extend_from_slice(&["--key-file", "-", dev]);
+    // with --key-file - cryptsetup reads the key from stdin once, no second prompt
     with_stdin(pass, "cryptsetup", &format_args);
     with_stdin(pass, "cryptsetup", &["open", dev, MAPPER]);
     format!("/dev/mapper/{}", MAPPER)

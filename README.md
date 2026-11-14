@@ -44,29 +44,21 @@ Arrow keys / `j` `k` to move, Enter to accept, space toggles in multi-select lis
 
 ## Questions
 
-| step | what | default |
-|---|---|---|
-| 1 | disk (`lsblk` list, type the path) | - |
-| 2 | dualboot | no |
-| 3 | EFI size (only when wiping) | 1024 MiB, min 300 |
-| 4 | swap GiB (also for hibernation, 0 = none) | 4 |
-| 5 | root GiB (0 = rest of disk) | 0 |
-| 6 | filesystem: btrfs, ext4, xfs | btrfs |
-| 7 | LUKS | no |
-| 8 | hibernate to swap (only asked when swap >= RAM) | yes |
-| 9 | kernel: linux, linux-lts, linux-zen | linux |
-| 10 | GPU: intel, amd, nvidia, nvidia-open, nouveau, virt | detected from `lspci` |
-| 11 | multilib (32-bit libs) | yes |
-| 12 | Wayland + XWayland stack | yes |
-| 13 | extra packages, multi-select: nano, curl, git, flatpak, pipewire, man-db, reflector, graphics, firmware | all |
-| 14 | hostname | **none, you must type it** (lowercase, digits, `-`, `_`, max 31) |
-| 15 | username | **none, you must type it** (same rules) |
-| 16 | timezone, keyboard layout, locale | UTC, us, en_US |
-| 17 | login shell: bash, zsh, fish | bash |
-| 18 | passwords: LUKS (only with LUKS), user, root | hidden, typed twice |
-| 19 | final package list + "Start the installation?" | no |
+Eight numbered sections, each starting with a header like `[3/8] Sizes`. Bad input is re-asked,
+never fatal.
 
-Timezone, keymap, locale, shell, kernel and filesystem are arrow-key menus. The timezone list is short (15 zones); anything else can be set afterwards with `timedatectl`.
+| step | section | what | default |
+|---|---|---|---|
+| 1 | Disk | pick a whole disk from `lsblk`; the live ISO's own disk is refused | - |
+| 2 | Partitioning | keep existing partitions and install into the free space, or wipe | keep, if free space >= 16 GiB |
+| 3 | Sizes | swap GiB, root GiB (0 = rest), EFI size when wiping | 4, 0, 1024 MiB |
+| 4 | Filesystem and encryption | btrfs / ext4 / xfs, LUKS, then the plan | btrfs, no LUKS |
+| 5 | Hardware | kernel, GPU driver | linux, detected |
+| 6 | Packages | multilib, Wayland stack, extra groups | all on |
+| 7 | System | hostname, username, timezone, keymap, locale, shell | none, none, UTC, us, en_US, bash |
+| 8 | Passwords | LUKS passphrase (only with LUKS), user, root | typed twice |
+
+Hibernation is asked right after the sizes and only when swap is at least as large as RAM.
 
 ## What it builds
 

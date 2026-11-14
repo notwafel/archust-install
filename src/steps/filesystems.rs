@@ -42,6 +42,12 @@ pub fn format(cfg: &Config, devices: &[String]) -> Formatted {
 pub fn mount(cfg: &Config, fs: &Formatted, root: &str) {
     say("Mounts");
     let opts = cfg.fs.fstab_options();
+    // grub-mkconfig probes /boot; without this it may see the live ISO's own fstab entries
+    stdfs::create_dir_all(format!("{}/boot", MNT)).ok();
+    sh("mount", &[&fs.esp, &format!("{}/boot", MNT)]);
+    for sw in &fs.swaps {
+        sh("swapon", &[sw]);
+    }
     match cfg.fs {
         Fs::Btrfs => {
             sh("mkfs.btrfs", &["-f", "-L", "archust", root]);
@@ -57,11 +63,6 @@ pub fn mount(cfg: &Config, fs: &Formatted, root: &str) {
             other.mkfs(root);
             sh("mount", &["-o", opts, root, MNT]);
         }
-    }
-    stdfs::create_dir_all(format!("{}/boot", MNT)).ok();
-    sh("mount", &[&fs.esp, &format!("{}/boot", MNT)]);
-    for sw in &fs.swaps {
-        sh("swapon", &[sw]);
     }
 }
 

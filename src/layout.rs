@@ -28,9 +28,16 @@ pub struct Request {
     pub free_start: u64, // MiB, dualboot only
 }
 
+/// Unpartitioned room after the last existing partition. Dualboot plans live here, not in
+/// `total_mib`: an existing system may fill the disk almost completely and still have room.
+pub fn free_mib(r: &Request) -> u64 {
+    r.total_mib.saturating_sub(r.free_start) + 1
+}
+
 /// `None` when the request does not fit. An existing ESP (dualboot) is not in the result.
 pub fn plan(r: Request) -> Option<Vec<Part>> {
-    if r.total_mib < 16384 {
+    let space = space_mib(&r);
+    if space < 16384 {
         return None;
     }
     let esp_exists = r.dualboot && r.free_start > 1;
@@ -50,11 +57,16 @@ pub fn plan(r: Request) -> Option<Vec<Part>> {
         s = e + 1;
     }
     let e = if r.root_mib > 0 { s + r.root_mib - 1 } else { r.total_mib - 1 };
-    if e >= r.total_mib {
+    if e >= r.total_mib || e < s {
         return None;
     }
     parts.push(Part { role: Role::Root, start: s, end: e });
     Some(parts)
+}
+
+/// Usable space for the plan, in MiB.
+pub fn space_mib(r: &Request) -> u64 {
+    if r.dualboot { free_mib(r) } else { r.total_mib }
 }
 
 /// True when parts are ordered, non-overlapping, inside `total` and end with root.
@@ -98,6 +110,10 @@ pub fn self_check() -> bool {
         Request { total_mib: 204800, boot_mib: 1024, swap_mib: 0, root_mib: 300 * 1024, dualboot: false, free_start: 1 },
         Request { total_mib: 8192, boot_mib: 1024, swap_mib: 0, root_mib: 0, dualboot: false, free_start: 1 },
         Request { total_mib: 204800, boot_mib: 256, swap_mib: 0, root_mib: 0, dualboot: false, free_start: 1 },
+        // dualboot, but the existing system fills the whole disk: nothing left to install into
+        Request { total_mib: 204800, boot_mib: 0, swap_mib: 0, root_mib: 0, dualboot: true, free_start: 204800 },
+        // dualboot with only 8 GiB of free space
+        Request { total_mib: 204800, boot_mib: 0, swap_mib: 0, root_mib: 0, dualboot: true, free_start: 196608 },
     ];
     for r in rejected {
         if plan(r).is_some() {

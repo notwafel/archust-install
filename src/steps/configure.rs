@@ -49,16 +49,28 @@ pub fn configure(cfg: &Config, root_dev: &str) {
     chroot(&["grub-mkconfig", "-o", "/boot/grub/grub.cfg"]);
 
     users(cfg);
+    services(cfg);
 }
 
 fn users(cfg: &Config) {
-    say("Users and services");
+    say("Users");
+    // the login shell has to exist in the target; useradd accepts any path without checking
+    if !crate::sys::exists(&format!("{}{}", crate::sys::MNT, cfg.shell)) {
+        crate::ui::die(&format!("{} is not in the target, login shell would be broken", cfg.shell));
+    }
     quiet("arch-chroot", &[crate::sys::MNT, "useradd", "-m", "-G", "wheel", "-s", &cfg.shell, &cfg.user]);
+    if !crate::sys::exists(&format!("{}/home/{}", crate::sys::MNT, cfg.user)) {
+        crate::ui::die(&format!("useradd failed for {}", cfg.user));
+    }
     with_stdin(&format!("{}:{}\n", cfg.user, cfg.user_pass), "arch-chroot", &[crate::sys::MNT, "chpasswd"]);
     with_stdin(&format!("root:{}\n", cfg.root_pass), "arch-chroot", &[crate::sys::MNT, "chpasswd"]);
     write_file("/etc/sudoers.d/10-wheel", "%wheel ALL=(ALL:ALL) ALL\n");
     quiet("chmod", &["440", &format!("{}/etc/sudoers.d/10-wheel", crate::sys::MNT)]);
     quiet("chmod", &["700", &format!("{}/root", crate::sys::MNT)]);
+}
+
+fn services(cfg: &Config) {
+    say("Services");
     chroot(&["systemctl", "enable", "NetworkManager", "systemd-timesyncd", "fstrim.timer"]);
     // the mirrorlist came from the ISO; keep it fresh when reflector is installed
     if cfg.packages.contains(&"reflector") {

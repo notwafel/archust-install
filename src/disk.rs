@@ -4,6 +4,26 @@ use crate::layout::{Part, Role};
 use crate::sys::{out, run};
 use crate::ui::die;
 
+/// The disk the running live ISO booted from; installing there would destroy the run itself.
+pub fn is_live_disk(dev: &str) -> bool {
+    let booted = out("lsblk", &["-no", "PKNAME", "/run/archiso/bootmnt"])
+        .or_else(|| out("lsblk", &["-no", "PKNAME", "-J", "/dev/disk/by-label/ARCH"]))
+        .unwrap_or_default();
+    !booted.is_empty() && booted.lines().any(|l| l.trim() == dev.trim_start_matches("/dev/"))
+}
+
+/// `PARTED`-style listing for the summary before asking whether to keep it.
+pub fn table(disk: &str) -> String {
+    out("parted", &["-sm", disk, "unit", "MiB", "print"]).unwrap_or_default()
+}
+
+/// Unpartitioned space after the last partition, in MiB.
+pub fn free_mib(disk: &str) -> u64 {
+    let total = size_mib(disk);
+    let used = free_start(disk);
+    if used >= total { 0 } else { total - used + 1 }
+}
+
 pub fn dev_name(disk: &str, index: u32) -> String {
     if disk.ends_with(|c: char| c.is_ascii_digit()) {
         format!("{}p{}", disk, index)
@@ -85,7 +105,7 @@ pub fn last_number(disk: &str) -> u32 {
 }
 
 /// Writes the plan to disk, returns the device path of each new partition.
-pub fn create(disk: &str, parts: &[Part], dual: bool) -> Vec<String> {
+pub fn create(disk: &str, parts: &[Part], dual: bool, root_fs_hint: &str) -> Vec<String> {
     if !dual {
         run("parted", &["-s", disk, "mklabel", "gpt"]);
     }
@@ -95,7 +115,8 @@ pub fn create(disk: &str, parts: &[Part], dual: bool) -> Vec<String> {
         let (label, fs) = match p.role {
             Role::Esp => ("archust-efi", "fat32"),
             Role::Swap => ("archust-swap", "linux-swap"),
-            Role::Root => ("archust-root", "btrfs"),
+            // parted's fs hint only sets the GPT type; mkfs picks the real filesystem later
+            Role::Root => ("archust-root", root_fs_hint),
         };
         run("parted", &[
             "-s", disk, "mkpart", label, fs,

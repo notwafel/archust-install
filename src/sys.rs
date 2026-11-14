@@ -100,6 +100,8 @@ fn reflector_args() -> Vec<String> {
 /// 10 fastest HTTPS mirrors from trusted countries, then the keyring.
 pub fn prepare_mirrors() {
     crate::ui::say("Mirrors: HTTPS, 10 fastest from trusted countries");
+    // live writes go to a tmpfs sized at boot; a full install needs far more than the default
+    grow_cowspace();
     const LIVE_CONF: &str = "/etc/xdg/reflector/reflector.conf";
     if let Some(dir) = Path::new(LIVE_CONF).parent() {
         fs::create_dir_all(dir).ok();
@@ -117,9 +119,12 @@ pub fn prepare_mirrors() {
     if n != 10 {
         die(&format!("expected 10 mirrors, got {}", n));
     }
-    // live writes go to a tmpfs sized at boot; a full install needs far more than the default
-    grow_cowspace();
-    quiet("pacman", &["-Syy", "--noconfirm"]);
+    // the ISO database can be months old and `-Sy` after a partial refresh breaks deps, so a
+    // full upgrade is the only safe refresh; cowspace is what makes it fit
+    if !quiet_ok("pacman", &["-Syu", "--noconfirm"]) {
+        crate::ui::warn("pacman -Syu failed on the live ISO, trying a plain refresh");
+        quiet("pacman", &["-Syy", "--noconfirm"]);
+    }
     quiet("pacman", &["-Sy", "--noconfirm", "--needed",
         "archlinux-keyring", "btrfs-progs", "gptfdisk", "dosfstools", "cryptsetup"]);
     quiet("pacman-key", &["--init"]);

@@ -71,11 +71,8 @@ impl std::fmt::Display for Gpu {
 pub fn ask_gpu() -> Gpu {
     let detected = Gpu::detect();
     let default = CHOICES.iter().position(|g| *g == detected).unwrap_or(5);
-    crate::ui::say("GPU");
-    for (i, label) in LABELS.iter().enumerate() {
-        crate::ui::note(&format!("  {}. {}", i + 1, label));
-    }
-    pick("GPU driver", &CHOICES, default)
+    let label = pick("GPU driver", &LABELS, default);
+    CHOICES[LABELS.iter().position(|l| *l == label).unwrap_or(0)]
 }
 
 pub fn memory_gib() -> u64 {
@@ -89,7 +86,8 @@ pub fn memory_gib() -> u64 {
     kb.div_ceil(1048576)
 }
 
-pub fn cpu_ucode() -> Option<&'static str> {    let cpuinfo = std::fs::read_to_string("/proc/cpuinfo").unwrap_or_default();
+pub fn cpu_ucode() -> Option<&'static str> {
+    let cpuinfo = std::fs::read_to_string("/proc/cpuinfo").unwrap_or_default();
     let vendor = cpuinfo.lines().find(|l| l.starts_with("vendor_id"));
     match vendor {
         Some(l) if l.contains("Intel") => Some("intel-ucode"),

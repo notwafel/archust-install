@@ -1,12 +1,14 @@
-//! Question sequence, archinstall-style menus over arrow keys.
+//! Question sequence, archinstall-style menus over arrow keys, one numbered section per step.
 
 use crate::config::Config;
 use crate::detect;
 use crate::disk;
 use crate::fs::{self, Fs};
-use crate::layout::{plan, Request};
-use crate::term::{ask, ask_name, ask_num, ask_num_min, ask_yes, pick, pick_many};
-use crate::ui::{die, note, say, warn};
+use crate::layout::{self, plan, Request};
+use crate::term::{ask, ask_name, ask_num, ask_yes, pick, pick_many};
+use crate::ui::{die, item, note, say, step, warn};
+
+const STEPS: usize = 8;
 
 const KERNELS: [&str; 3] = ["linux", "linux-lts", "linux-zen"];
 const KEYMAPS: [&str; 12] = ["us", "uk", "de", "fr", "es", "it", "pl", "pt", "nl", "se", "no", "dk"];
@@ -46,67 +48,39 @@ const WAYLAND: [&str; 12] = [
     "xdg-desktop-portal", "xdg-utils",
 ];
 
-/// Re-asks the partition questions when `plan()` rejects the sizes.
-fn ask_layout(
-    total_mib: u64,
+/// What step 2 decided: keep the disk (reuse ESP, start after the last partition) or wipe it.
+struct Keep {
     dual: bool,
+    esp_part: Option<String>,
     free_start: u64,
     boot_mib: u64,
-) -> (u64, Vec<crate::layout::Part>) {
-    loop {
-        let swap_gib = ask_num("Swap, also for hibernation (GiB, 0 = none)", 4);
-        let root_gib = ask_num("Root (GiB, 0 = rest of disk)", 0);
-        let parts = plan(Request {
-            total_mib,
-            boot_mib,
-            swap_mib: swap_gib * 1024,
-            root_mib: root_gib * 1024,
-            dualboot: dual,
-            free_start,
-        });
-        match parts {
-            Some(parts) => return (swap_gib, parts),
-            None => warn("does not fit on this disk, try smaller sizes"),
-        }
-    }
+}
+
+/// Everything the layout questions produced, before the rest of the answers exist.
+struct Layout {
+    dual: bool,
+    esp_part: Option<String>,
+    parts: Vec<layout::Part>,
+    hibernate: bool,
 }
 
 pub fn ask_everything() -> Config {
     let disk = ask_disk();
     let total_mib = disk::size_mib(&disk);
-    let has_parts = disk::has_partitions(&disk);
+    let layout_answers = ask_layout(&disk, total_mib);
 
-    let dual = has_parts && ask_yes("Dualboot (keep existing partitions, new ones at the end)?", false);
-    let (esp_part, free_start, boot_mib) = if dual {
-        let esp = disk::existing_esp(&disk)
-            .unwrap_or_else(|| die(&format!("dualboot: no EFI partition on {}", disk)));
-        let free = disk::free_start(&disk);
-        if free >= total_mib {
-            die("no free space after the last partition");
-        }
-        say(&format!("reusing {} as /boot", esp));
-        (Some(esp), free, 0)
-    } else {
-        warn(&format!("This wipes ALL of {} - irreversible.", disk));
-        if !ask_yes("Confirm ERASE", false) {
-            die("aborted");
-        }
-        (None, 1, ask_num_min("EFI partition (MiB)", 1024, 300))
-    };
-
-    let (swap_gib, parts) = ask_layout(total_mib, dual, free_start, boot_mib);
+    step(4, STEPS, "Filesystem and encryption");
     let fs = pick("Filesystem", &fs::CHOICES, 0);
     let luks = ask_yes("LUKS encryption?", false);
-    let hibernate = swap_gib >= 1
-        && detect::memory_gib() <= swap_gib
-        && ask_yes("Hibernate to swap (resume from disk)?", true);
-    show_plan(&disk, total_mib, dual, luks, fs, esp_part.as_deref(), &parts);
+    show_plan(&disk, total_mib, &layout_answers, fs, luks);
 
+    step(5, STEPS, "Hardware");
     let kernel = pick("Kernel", &KERNELS, 0);
     let gpu = detect::ask_gpu();
+
+    step(6, STEPS, "Packages");
     let multilib = ask_yes("Enable multilib (32-bit libs, Steam/Wine/games)?", true);
     let wayland = ask_yes("Wayland + XWayland stack now (ready for a compositor)?", true);
-
     let groups = EXTRAS.iter().map(|(name, _)| *name).collect::<Vec<_>>();
     let checked = vec![true; groups.len()];
     let mut extras: Vec<&str> = Vec::new();
@@ -116,19 +90,24 @@ pub fn ask_everything() -> Config {
         }
     }
 
+    step(7, STEPS, "System");
     let hostname = ask_name("Hostname");
     let user = ask_name("Username");
     let tz = pick_zone();
     let keymap = pick("Keyboard layout", &KEYMAPS, 0).to_string();
     let locale = pick("Locale", &LOCALES, 0).to_string();
     let shell = pick("Login shell", &SHELLS, 0).to_string();
-    let swap = parts
-        .iter()
-        .find(|p| p.role == crate::layout::Role::Swap)
-        .map(|p| (disk::dev_name(&disk, partition_index(&disk, &parts, p)), hibernate));
+
+    step(8, STEPS, "Passwords");
     let luks_pass = if luks { crate::term::ask_pass("LUKS passphrase") } else { String::new() };
     let user_pass = crate::term::ask_pass("User password");
     let root_pass = crate::term::ask_pass("Root password");
+
+    let swap = layout_answers
+        .parts
+        .iter()
+        .find(|p| p.role == layout::Role::Swap)
+        .map(|p| (disk::dev_name(&disk, partition_index(&disk, &layout_answers.parts, p)), layout_answers.hibernate));
 
     let mut packages = BASE.to_vec();
     packages.extend(extras);
@@ -154,7 +133,7 @@ pub fn ask_everything() -> Config {
     if luks {
         packages.push("cryptsetup");
     }
-    if dual {
+    if layout_answers.dual {
         packages.push("os-prober");
     }
     packages.sort_unstable();
@@ -162,9 +141,9 @@ pub fn ask_everything() -> Config {
 
     Config {
         disk,
-        dual,
-        esp_part,
-        parts,
+        dual: layout_answers.dual,
+        esp_part: layout_answers.esp_part,
+        parts: layout_answers.parts,
         luks,
         multilib,
         fs,
@@ -183,6 +162,83 @@ pub fn ask_everything() -> Config {
     }
 }
 
+/// Steps 2-3: keep the disk or wipe it, then the sizes. Re-asks until the plan fits.
+fn ask_layout(disk: &str, total_mib: u64) -> Layout {
+    step(2, STEPS, "Partitioning");
+    let Keep { dual, esp_part, free_start, boot_mib } = if disk::has_partitions(disk) {
+        note(&disk::table(disk));
+        if ask_yes("Keep the existing partitions and install into the free space?", true) {
+            match disk::existing_esp(disk) {
+                Some(esp) if disk::free_mib(disk) >= 16384 => {
+                    say(&format!("reusing {} as /boot", esp));
+                    item("free space", &format!("{} MiB", disk::free_mib(disk)));
+                    Keep { dual: true, esp_part: Some(esp), free_start: disk::free_start(disk), boot_mib: 0 }
+                }
+                Some(_) => {
+                    warn(&format!("only {} MiB free after the last partition, 16384 MiB needed",
+                        disk::free_mib(disk)));
+                    wipe(disk)
+                }
+                None => {
+                    warn(&format!("{} has no EFI partition, a new one has to be created", disk));
+                    wipe(disk)
+                }
+            }
+        } else {
+            wipe(disk)
+        }
+    } else {
+        say(&format!("{} is empty", disk));
+        wipe_esp()
+    };
+
+    step(3, STEPS, "Sizes");
+    let space = layout::space_mib(&Request {
+        total_mib, boot_mib, swap_mib: 0, root_mib: 0, dualboot: dual, free_start,
+    });
+    item("usable", &format!("{} MiB{}", space, if dual { " (free space)" } else { "" }));
+
+    loop {
+        let swap_gib = ask_num("Swap, also for hibernation (GiB, 0 = none)", 4);
+        let root_gib = ask_num("Root (GiB, 0 = rest of the usable space)", 0);
+        let parts = plan(Request {
+            total_mib,
+            boot_mib,
+            swap_mib: swap_gib * 1024,
+            root_mib: root_gib * 1024,
+            dualboot: dual,
+            free_start,
+        });
+        let Some(parts) = parts else {
+            warn(&format!("does not fit in {} MiB of usable space, try smaller sizes", space));
+            continue;
+        };
+        let hibernate = swap_gib >= 1
+            && detect::memory_gib() <= swap_gib
+            && ask_yes("Hibernate to swap (resume from disk)?", true);
+        return Layout { dual, esp_part, parts, hibernate };
+    }
+}
+
+/// Wipe branch: confirmation, then a fresh EFI partition.
+fn wipe(disk: &str) -> Keep {
+    warn(&format!("This wipes ALL of {} - irreversible.", disk));
+    if !ask_yes("Confirm ERASE", false) {
+        die("aborted");
+    }
+    wipe_esp()
+}
+
+fn wipe_esp() -> Keep {
+    loop {
+        let mib = ask_num("EFI partition (MiB)", 1024);
+        if mib >= 300 {
+            return Keep { dual: false, esp_part: None, free_start: 1, boot_mib: mib };
+        }
+        warn("the EFI partition needs at least 300 MiB");
+    }
+}
+
 /// bash is already in `base`; the others have to be installed or the login fails.
 fn shell_package(shell: &str) -> Option<&'static str> {
     match shell {
@@ -193,13 +249,14 @@ fn shell_package(shell: &str) -> Option<&'static str> {
 }
 
 /// 1-based partition number: 1 is the ESP on a wiped disk, otherwise the last existing + offset.
-fn partition_index(disk: &str, parts: &[crate::layout::Part], part: &crate::layout::Part) -> u32 {
+fn partition_index(disk: &str, parts: &[layout::Part], part: &layout::Part) -> u32 {
     let position = parts.iter().position(|p| p.start == part.start).unwrap_or(0) + 1;
     let base = if disk::has_partitions(disk) { disk::last_number(disk) } else { 0 };
     base + position as u32
 }
 
-fn pick_zone() -> String {    let answer = pick("Timezone", &ZONES, 0).to_string();
+fn pick_zone() -> String {
+    let answer = pick("Timezone", &ZONES, 0).to_string();
     let path = format!("/usr/share/zoneinfo/{}", answer);
     if std::path::Path::new(&path).exists() {
         answer
@@ -210,10 +267,14 @@ fn pick_zone() -> String {    let answer = pick("Timezone", &ZONES, 0).to_string
 }
 
 fn ask_disk() -> String {
-    say("Disks");
+    step(1, STEPS, "Disk");
     note(&disk::list());
     loop {
         let d = ask("Install disk (e.g. /dev/nvme0n1)", "");
+        if disk::is_live_disk(&d) {
+            warn(&format!("{} holds the running live ISO, pick another disk", d));
+            continue;
+        }
         if disk::is_whole_disk(&d) {
             note(&disk::describe(&d));
             return d;
@@ -222,26 +283,25 @@ fn ask_disk() -> String {
     }
 }
 
-fn show_plan(
-    disk: &str,
-    total_mib: u64,
-    dual: bool,
-    luks: bool,
-    fs: Fs,
-    esp: Option<&str>,
-    parts: &[crate::layout::Part],
-) {
-    say(&format!("Plan: {} ({} GiB), dualboot={}, LUKS={}, fs={}", disk, total_mib / 1024, dual, luks, fs));
-    if let Some(e) = esp {
-        note(&format!("  {:<16} {:<10} ESP /boot (existing)", e, "-"));
+fn show_plan(disk: &str, total_mib: u64, layout: &Layout, fs: Fs, luks: bool) {
+    say(&format!("Plan on {} ({} GiB)", disk, total_mib / 1024));
+    item("keep existing", if layout.dual { "yes" } else { "no, full wipe" });
+    item("encryption", if luks { "LUKS2 on root" } else { "none" });
+    item("filesystem", &fs.to_string());
+    if let Some(e) = &layout.esp_part {
+        item("ESP /boot", &format!("{} (existing)", e));
     }
-    for p in parts {
-        let extra = if p.role == crate::layout::Role::Root && luks { " (LUKS2)" } else { "" };
-        note(&format!("  {:<16} {:<10} {:?}{}", "new partition", format!("{}MiB", p.size()), p.role, extra));
+    for p in &layout.parts {
+        let extra = if p.role == layout::Role::Root && luks { " (LUKS2)" } else { "" };
+        item(
+            &format!("{:?}", p.role),
+            &format!("{} MiB {}{}", p.size(), if layout.dual { "at end of disk" } else { "new partition" }, extra),
+        );
     }
     if fs.has_subvolumes() {
-        note(&format!("  btrfs subvolumes: {}", fs::SUBVOLS.join(" ")));
+        item("subvolumes", &fs::SUBVOLS.join(" "));
     } else {
-        note("  single root filesystem, no subvolumes");
+        item("subvolumes", "none, single root filesystem");
     }
+    crate::ui::rule();
 }

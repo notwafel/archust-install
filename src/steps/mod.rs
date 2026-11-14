@@ -11,7 +11,7 @@ use crate::ui::say;
 
 pub fn install(cfg: &Config) {
     say("Partitioning");
-    let devices = disk::create(&cfg.disk, &cfg.parts, cfg.dual);
+    let devices = disk::create(&cfg.disk, &cfg.parts, cfg.dual, cfg.fs.key());
 
     let fs = filesystems::format(cfg, &devices);
     let root = if cfg.luks {

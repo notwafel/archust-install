@@ -6,17 +6,15 @@ use crate::sys::{MNT, out, run as sh, write_file};
 use crate::ui::{die, say};
 
 const LIVE_CONF: &str = "/etc/pacman.conf";
-const NEW_CONF: &str = "/mnt/etc/pacman.conf";
 
 pub fn base(cfg: &Config) {
     if cfg.multilib {
         say("multilib: uncommenting [multilib] in pacman.conf");
-        // both copies ship the repo commented out; the live one must know it before pacstrap
-        for path in [LIVE_CONF, NEW_CONF] {
-            let conf = std::fs::read_to_string(path).unwrap_or_else(|_| die(&format!("cannot read {}", path)));
-            std::fs::write(path, uncomment_multilib(&conf))
-                .unwrap_or_else(|_| die(&format!("cannot write {}", path)));
-        }
+        // the target copy only exists after pacstrap, so only the live copy can be edited now;
+        // it is copied into /mnt right after pacstrap
+        let conf = std::fs::read_to_string(LIVE_CONF).unwrap_or_else(|_| die(&format!("cannot read {}", LIVE_CONF)));
+        std::fs::write(LIVE_CONF, uncomment_multilib(&conf))
+            .unwrap_or_else(|_| die(&format!("cannot write {}", LIVE_CONF)));
         sh("pacman", &["-Syy", "--noconfirm"]);
     }
 
@@ -29,6 +27,11 @@ pub fn base(cfg: &Config) {
         Fs::Btrfs => {}
     }
     sh("pacstrap", &args);
+
+    if cfg.multilib {
+        let live = std::fs::read_to_string(LIVE_CONF).unwrap_or_else(|_| die("cannot read live pacman.conf"));
+        write_file("/etc/pacman.conf", &live);
+    }
 
     say("fstab");
     let fstab = out("genfstab", &["-U", MNT]).unwrap_or_else(|| die("genfstab failed"));

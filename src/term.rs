@@ -53,18 +53,6 @@ pub fn ask_num(name: &str, default: u64) -> u64 {
     finish(Input::<u64>::new().with_prompt(name).default(default).interact_text())
 }
 
-pub fn ask_num_min(name: &str, default: u64, min: u64) -> u64 {
-    finish(
-        Input::<u64>::new()
-            .with_prompt(name)
-            .default(default)
-            .validate_with(move |v: &u64| {
-                if *v < min { Err(format!("minimum is {}", min)) } else { Ok(()) }
-            })
-            .interact_text(),
-    )
-}
-
 pub fn ask_yes(name: &str, default_yes: bool) -> bool {
     finish(Confirm::new().with_prompt(name).default(default_yes).interact())
 }
