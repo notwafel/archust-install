@@ -16,14 +16,14 @@ const ARGS: [&str; 12] = [
     "--pbkdf-force-iterations", "3",
 ];
 
-/// Formats and opens `dev`; returns the mapper device path.
-pub fn encrypt(dev: &str, pass: &str) -> String {
+/// Formats and opens `dev` under `mapper`; returns the mapper device path.
+pub fn encrypt(dev: &str, pass: &str, mapper: &str) -> String {
     say("LUKS2: aes-xts-plain64, 512-bit key, argon2id");
     let mut format_args = vec!["luksFormat"];
     format_args.extend_from_slice(&ARGS);
     format_args.extend_from_slice(&["--key-file", "-", dev]);
     // with --key-file - cryptsetup reads the key from stdin once, no second prompt
     with_stdin(pass, "cryptsetup", &format_args);
-    with_stdin(pass, "cryptsetup", &["open", dev, MAPPER]);
-    format!("/dev/mapper/{}", MAPPER)
+    with_stdin(pass, "cryptsetup", &["open", dev, mapper]);
+    format!("/dev/mapper/{}", mapper)
 }

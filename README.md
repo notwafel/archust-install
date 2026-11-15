@@ -77,8 +77,8 @@ re-asked; a wrong typed wipe confirmation aborts.
 
 | step | section | what | default |
 |---|---|---|---|
-| 1 | Disk | select a whole disk, shown with size, model, partition count and `in use`; the live ISO boot disk is excluded | first listed disk |
-| 2 | Partitioning | reuse an existing ESP and install after the last partition, or wipe; a non-FAT ESP offers formatting | keep existing partitions when present |
+| 1 | Disk | select a whole disk, shown with size, model, partition count and `in use`; the live ISO boot disk is excluded; other disks can be erased first with optional zero overwrite, ext4/btrfs/xfs/exFAT/FAT32 and LUKS2 | first listed disk; no extra disks |
+| 2 | Partitioning | reuse an existing ESP and install after the last partition, or wipe; a non-FAT ESP offers formatting; a full wipe can overwrite the disk with zeros | keep existing partitions when present; zero off |
 | 3 | Sizes | swap GiB, root GiB (`0` = remaining usable space), EFI size for a wipe | `4`, `0`, `1024` MiB |
 | 4 | Filesystem and encryption | btrfs / ext4 / xfs, optional LUKS, then show the plan | btrfs, LUKS off |
 | 5 | Hardware | kernel, CPU microcode, GPU driver | `linux`, detected CPU, detected GPU |
@@ -90,6 +90,18 @@ The dualboot branch requires an existing ESP and at least 16 GiB after the last 
 empty disk always takes the wipe branch. A new EFI partition must be at least 300 MiB; an existing
 one is reused as is. A non-FAT32 ESP can be formatted in place after a separate confirmation, or
 the run falls back to the wipe branch.
+
+Other disks can be erased in the same run: each selected disk needs its exact path typed back,
+then gets one GPT partition with ext4, btrfs, xfs, exFAT, FAT32 or no filesystem. Zero overwrite and
+LUKS2 are separate options per disk; one data-disk passphrase covers all encrypted extras. A full
+wipe of the install disk can also zero it first. All erasing happens after `Start the
+installation?` and before the install disk is partitioned.
+
+Other disks can be erased in the same run: each selected disk needs its exact path typed back,
+then gets one GPT partition with ext4, btrfs, xfs, exFAT, FAT32 or no filesystem. Zero overwrite and
+LUKS2 are separate options per disk; one data-disk passphrase covers all encrypted extras. A full
+wipe of the install disk can also zero it first. All erasing happens after `Start the
+installation?` and before the install disk is partitioned.
 
 Hibernation is offered only when swap is at least RAM and at least 1 GiB. The prompt defaults to
 yes, so Enter adds the `resume` hook and `resume=UUID=`. After the last answer, the installer
@@ -311,6 +323,8 @@ Runs the partition arithmetic on fixed cases (wipe, dualboot, swap, fixed root) 
   shrinking or resizing of existing partitions. A non-`vfat` ESP must be formatted as FAT32
   first; declining falls back to the wipe branch.
 - No snapshot tool, zram or encrypted swap.
+- Zero overwrite writes logical sectors. On an SSD with wear levelling, old NAND cells may survive;
+  use the drive's secure-erase command when physical erasure is required.
 - Small installer, not general-purpose. Run `--check` and `cargo test` after each edit.
 
 ![](assets/divider-dark.svg#gh-dark-mode-only)

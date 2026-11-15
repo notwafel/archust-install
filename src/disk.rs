@@ -119,7 +119,7 @@ fn partition_count(listing: &str) -> usize {
 
 /// Parted refuses to relabel a disk whose partitions are mounted, active as swap or held by an
 /// open LUKS mapper. Swap is switched off; the rest aborts with the manual recovery command.
-fn clear_busy(disk: &str) {
+pub fn clear_busy(disk: &str) {
     let usage = usage_from(&listing(disk));
     for dev in &usage.swap {
         run("swapoff", &[dev.as_str()]);
@@ -317,7 +317,7 @@ pub fn swap_device(parts: &[Part], devices: &[String], hibernate: bool) -> Optio
 #[cfg(test)]
 mod tests {
     use super::{
-        EspChoice, disk_names, keep_choice, last_end_from_table, partition_count,
+        EspChoice, dev_name, disk_names, keep_choice, last_end_from_table, partition_count,
         partition_numbers_from_table, usage_from,
     };
 
@@ -352,6 +352,12 @@ mod tests {
                        NAME=\"/dev/mapper/root\" TYPE=\"crypt\" FSTYPE=\"ext4\" MOUNTPOINTS=\"\"\n";
         assert_eq!(partition_count(listing), 1);
         assert_eq!(usage_from(listing).crypt, ["/dev/mapper/root"]);
+    }
+
+    #[test]
+    fn device_names_follow_the_disk_kind() {
+        assert_eq!(dev_name("/dev/sda", 1), "/dev/sda1");
+        assert_eq!(dev_name("/dev/nvme0n1", 1), "/dev/nvme0n1p1");
     }
 
     #[test]

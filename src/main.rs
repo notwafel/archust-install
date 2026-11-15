@@ -28,6 +28,23 @@ fn run() {
     let cfg = prompt::ask_everything();
     sys::check_packages(&cfg.packages, cfg.multilib);
     ui::say(&format!("Packages ({}): {}", cfg.packages.len(), cfg.packages.join(" ")));
+    if cfg.zero_install {
+        ui::say(&format!("{} will be overwritten with zeros before partitioning", cfg.disk));
+    }
+    for extra in &cfg.extras {
+        let fs = if extra.fs == config::ExtraFs::None {
+            "raw disk".to_string()
+        } else {
+            extra.fs.to_string()
+        };
+        ui::say(&format!(
+            "Extra disk {}: {}{}{}",
+            extra.dev,
+            if extra.zero { "zeros, " } else { "" },
+            fs,
+            if extra.luks { ", LUKS2" } else { "" }
+        ));
+    }
     if !term::ask_yes("Start the installation?", false) {
         ui::die("aborted");
     }

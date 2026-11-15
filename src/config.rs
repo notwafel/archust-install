@@ -18,11 +18,47 @@ impl std::fmt::Display for Power {
     }
 }
 
+/// Filesystem written to an extra disk after its data is destroyed.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ExtraFs {
+    None,
+    Ext4,
+    Btrfs,
+    Xfs,
+    Exfat,
+    Fat32,
+}
+
+impl std::fmt::Display for ExtraFs {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            ExtraFs::None => f.write_str("none (leave the disk raw)"),
+            ExtraFs::Ext4 => f.write_str("ext4"),
+            ExtraFs::Btrfs => f.write_str("btrfs"),
+            ExtraFs::Xfs => f.write_str("xfs"),
+            ExtraFs::Exfat => f.write_str("exFAT"),
+            ExtraFs::Fat32 => f.write_str("FAT32"),
+        }
+    }
+}
+
+/// An extra disk is erased before the install disk is touched. Zeroing and encryption are
+/// optional; the filesystem is created on the single data partition.
+pub struct ExtraDisk {
+    pub dev: String,
+    pub zero: bool,
+    pub fs: ExtraFs,
+    pub luks: bool,
+}
+
 pub struct Config {
     pub disk: String,
     pub dual: bool,
     pub esp_part: Option<String>,
     pub format_esp: bool,
+    pub zero_install: bool,
+    pub extras: Vec<ExtraDisk>,
+    pub extra_luks_pass: String,
     pub parts: Vec<crate::layout::Part>,
     pub luks: bool,
     pub multilib: bool,

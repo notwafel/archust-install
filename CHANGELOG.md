@@ -5,6 +5,25 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-15
+
+### Added
+
+- **Extra disks can be erased during the install.** After picking the install disk, a multi-select
+  offers every other disk. Each one requires its exact path typed back, then gets one GPT partition
+  with `ext4`, `btrfs`, `xfs`, `exFAT`, `FAT32` or no filesystem. Zero overwrite and LUKS2 are
+  separate per-disk options; one passphrase covers all encrypted extra disks.
+- **The install disk can be overwritten with zeros.** A full wipe offers a default-no zero pass
+  before partitioning. It runs after `Start the installation?`, so aborting leaves the disk
+  untouched.
+
+### Changed
+
+- Extra disks and the install disk are zeroed with `dd if=/dev/zero bs=1M status=progress
+  conv=fsync`. The logical-sector limitation on SSDs is documented and marked with a `shortcut:`
+  comment.
+- `luks::encrypt` takes the mapper name, so data disks use `data` while the root stays `root`.
+
 ## [0.3.0] - 2026-11-15
 
 ### Added

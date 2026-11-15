@@ -116,6 +116,10 @@ is refreshed first. `-Sp` only prints URLs; a missing or renamed package aborts 
    - The boot disk name returned by `lsblk` is excluded from choices.
    - `blockdev --getsize64 <disk>` supplies the size used by the partition plan. Disk choices
      use bare names from `lsblk`, so the prompt adds `/dev/` exactly once.
+   - After the install disk is picked, a multi-select offers every other disk for erasing. Each
+     selected disk needs its exact path typed back, plus a filesystem (`ext4`, `btrfs`, `xfs`,
+     `exFAT`, `FAT32`, none), optional zero overwrite and optional LUKS2. One passphrase covers
+     all encrypted extra disks. Nothing is erased during the prompts.
 
 2. **Partitioning**
    - Existing layout and ESP detection:
@@ -137,7 +141,9 @@ is refreshed first. `-Sp` only prints URLs; a missing or renamed package aborts 
      `Format <device> as FAT32?` confirmation; declining falls back to the wipe branch with its
      typed confirmation. `mkfs.fat -F32 -n ESP <efi-device>` runs in the filesystem step, after
      the final `Start the installation?` confirmation.
-   - Wipe requires the exact disk path typed back. EFI size must be at least 300 MiB.
+   - Wipe requires the exact disk path typed back. EFI size must be at least 300 MiB. A separate
+     default-no question offers to overwrite the whole install disk with zeros before
+     partitioning.
 
 3. **Sizes**
    - Swap default: 4 GiB.
@@ -193,6 +199,30 @@ Start the installation? [default: no]
 ```
 
 ## 3. Partition creation
+
+Before the install disk is touched, the installer erases the extra disks chosen in step 1, then
+zeroes the install disk when that option was accepted:
+
+```sh
+lsblk -lpno NAME,TYPE,FSTYPE,MOUNTPOINTS -P <disk>   # mounted or open mapper aborts
+dd if=/dev/zero of=<disk> bs=1M status=progress conv=fsync   # only when zero was chosen
+parted -s <extra-disk> mklabel gpt
+parted -s <extra-disk> mkpart data 1MiB 100%
+partprobe <extra-disk>
+udevadm settle
+cryptsetup luksFormat --type luks2 ... --key-file - <extra-partition>  # optional
+cryptsetup open <extra-partition> data                                  # optional
+mkfs.ext4 -F -L data <target>       # or btrfs, xfs, exFAT, FAT32
+cryptsetup close data               # optional
+```
+
+Extra disks are erased first; a failure there stops the run before the install disk changes.
+`mkfs.exfat` must exist on the live ISO, otherwise the run stops before zeroing that disk. LUKS2
+on an extra disk is not auto-unlocked; open it with `cryptsetup open` and mount the mapper.
+
+`dd` overwrites logical sectors only. On an SSD with wear levelling, old NAND cells can survive;
+the drive's secure-erase command is the physical option. This is marked with a `shortcut:` comment
+in `src/steps/cleanup.rs`.
 
 Full wipe first reads the partitions of the disk:
 
@@ -401,6 +431,7 @@ cryptsetup close root    # LUKS only
 - `src/prompt.rs`: questions, defaults, package selection and validation.
 - `src/disk.rs`: disk discovery, partition arithmetic inputs and destructive partitioning.
 - `src/steps/filesystems.rs`: formatting and mount order.
+- `src/steps/cleanup.rs`: extra-disk erase, zero overwrite, data partition and LUKS2.
 - `src/steps/luks.rs`: cryptsetup options.
 - `src/steps/pacstrap.rs`: multilib, pacstrap, fstab and resume configuration.
 - `src/steps/configure.rs`: target files, bootloader, users and services.

@@ -1,6 +1,6 @@
 //! Question sequence, archinstall-style menus over arrow keys, one numbered section per step.
 
-use crate::config::{Config, Power};
+use crate::config::{Config, ExtraDisk, ExtraFs, Power};
 use crate::detect;
 use crate::disk;
 use crate::fs::{self, Fs};
@@ -60,6 +60,16 @@ fn extras_for(gpu: detect::Gpu) -> Vec<(&'static str, &'static str)> {
 
 const MULTILIB: [&str; 5] = ["lib32-mesa", "lib32-vulkan-icd-loader", "lib32-libva", "lib32-alsa-plugins", "lib32-gnutls"];
 
+/// Filesystems available for an extra disk; `None` leaves it raw after zeroing.
+const EXTRA_FS: [ExtraFs; 6] = [
+    ExtraFs::Ext4,
+    ExtraFs::Btrfs,
+    ExtraFs::Xfs,
+    ExtraFs::Exfat,
+    ExtraFs::Fat32,
+    ExtraFs::None,
+];
+
 /// Power management: the daemon and, for profiles, the plan that starts active.
 const POWER: [Power; 5] = [
     Power::Profiles("balanced"),
@@ -82,6 +92,7 @@ struct Keep {
     free_start: u64,
     boot_mib: u64,
     format_esp: bool,
+    zero_install: bool,
 }
 
 /// Everything the layout questions produced, before the rest of the answers exist.
@@ -89,12 +100,14 @@ struct Layout {
     dual: bool,
     esp_part: Option<String>,
     format_esp: bool,
+    zero_install: bool,
     parts: Vec<layout::Part>,
     hibernate: bool,
 }
 
 pub fn ask_everything() -> Config {
     let disk = ask_disk();
+    let extra_disks = ask_extras(&disk);
     let total_mib = disk::size_mib(&disk);
     let layout_answers = ask_layout(&disk, total_mib);
 
@@ -135,6 +148,11 @@ pub fn ask_everything() -> Config {
     let luks_pass = if luks { crate::term::ask_pass("LUKS passphrase") } else { String::new() };
     let user_pass = crate::term::ask_pass("User password");
     let root_pass = crate::term::ask_pass("Root password");
+    let extra_luks_pass = if extra_disks.iter().any(|e| e.luks) {
+        crate::term::ask_pass("Data disk LUKS passphrase")
+    } else {
+        String::new()
+    };
 
     let mut packages = BASE.to_vec();
     packages.extend(extras);
@@ -197,6 +215,9 @@ pub fn ask_everything() -> Config {
         dual: layout_answers.dual,
         esp_part: layout_answers.esp_part,
         format_esp: layout_answers.format_esp,
+        zero_install: layout_answers.zero_install,
+        extras: extra_disks,
+        extra_luks_pass,
         parts: layout_answers.parts,
         luks,
         multilib,
@@ -223,39 +244,43 @@ pub fn ask_everything() -> Config {
 /// Steps 2-3: keep the disk or wipe it, then the sizes. Re-asks until the plan fits.
 fn ask_layout(disk: &str, total_mib: u64) -> Layout {
     step(2, STEPS, "Partitioning");
-    let Keep { dual, esp_part, free_start, boot_mib, format_esp } = if disk::has_partitions(disk) {
-        let table = disk::table(disk);
-        note(&table);
-        if ask_yes("Keep the existing partitions and install into the free space?", true) {
-            let esp = disk::existing_esp(disk);
-            let kind = esp.as_deref().map(disk::fs_type).unwrap_or_default();
-            match disk::keep_choice(&table, total_mib, esp.as_deref(), &kind) {
-                disk::EspChoice::Reuse(free) => keep_existing(esp.expect("reuse needs an ESP"), free, disk, false),
-                disk::EspChoice::Format(free) => {
-                    let esp = esp.expect("format needs an ESP");
-                    if ask_format_esp(&esp, &kind) {
-                        keep_existing(esp, free, disk, true)
-                    } else {
-                        warn(&format!("{} cannot hold GRUB as it is", esp));
+    let Keep { dual, esp_part, free_start, boot_mib, format_esp, zero_install } =
+        if disk::has_partitions(disk) {
+            let table = disk::table(disk);
+            note(&table);
+            if ask_yes("Keep the existing partitions and install into the free space?", true) {
+                let esp = disk::existing_esp(disk);
+                let kind = esp.as_deref().map(disk::fs_type).unwrap_or_default();
+                match disk::keep_choice(&table, total_mib, esp.as_deref(), &kind) {
+                    disk::EspChoice::Reuse(free) => keep_existing(esp.expect("reuse needs an ESP"), free, disk, false),
+                    disk::EspChoice::Format(free) => {
+                        let esp = esp.expect("format needs an ESP");
+                        if ask_format_esp(&esp, &kind) {
+                            keep_existing(esp, free, disk, true)
+                        } else {
+                            warn(&format!("{} cannot hold GRUB as it is", esp));
+                            wipe(disk)
+                        }
+                    }
+                    disk::EspChoice::TooSmall(free) => {
+                        warn(&format!("only {} MiB free after the last partition, 16384 MiB needed", free));
+                        wipe(disk)
+                    }
+                    disk::EspChoice::NoEsp => {
+                        warn(&format!("{} has no EFI partition, a new one has to be created", disk));
                         wipe(disk)
                     }
                 }
-                disk::EspChoice::TooSmall(free) => {
-                    warn(&format!("only {} MiB free after the last partition, 16384 MiB needed", free));
-                    wipe(disk)
-                }
-                disk::EspChoice::NoEsp => {
-                    warn(&format!("{} has no EFI partition, a new one has to be created", disk));
-                    wipe(disk)
-                }
+            } else {
+                wipe(disk)
             }
         } else {
-            wipe(disk)
-        }
-    } else {
-        say(&format!("{} is empty", disk));
-        wipe_esp()
-    };
+            say(&format!("{} is empty", disk));
+            let zero_install = ask_zero(disk);
+            let mut keep = wipe_esp();
+            keep.zero_install = zero_install;
+            keep
+        };
 
     step(3, STEPS, "Sizes");
     let space = layout::space_mib(&Request {
@@ -283,14 +308,26 @@ fn ask_layout(disk: &str, total_mib: u64) -> Layout {
         let hibernate = swap_gib >= 1
             && detect::memory_gib() <= swap_gib
             && ask_yes("Hibernate to swap (resume from disk)?", true);
-        return Layout { dual, esp_part, format_esp, parts, hibernate };
+        return Layout { dual, esp_part, format_esp, zero_install, parts, hibernate };
     }
 }
 
 fn keep_existing(esp: String, free: u64, disk: &str, format_esp: bool) -> Keep {
     say(&format!("reusing {} as /boot", esp));
     item("free space", &format!("{} MiB", free));
-    Keep { dual: true, esp_part: Some(esp), free_start: disk::free_start(disk), boot_mib: 0, format_esp }
+    Keep {
+        dual: true,
+        esp_part: Some(esp),
+        free_start: disk::free_start(disk),
+        boot_mib: 0,
+        format_esp,
+        zero_install: false,
+    }
+}
+
+/// A full wipe can also overwrite every sector first; slow, so never the default.
+fn ask_zero(disk: &str) -> bool {
+    ask_yes(&format!("Overwrite {} with zeros before partitioning? (slow)", disk), false)
 }
 
 /// A stale or unformatted ESP is still usable after a fresh FAT32 filesystem. Destroying it is
@@ -310,14 +347,24 @@ fn wipe(disk: &str) -> Keep {
     if ask(&format!("Type {} to confirm", disk)) != disk {
         die("aborted");
     }
-    wipe_esp()
+    let zero_install = ask_zero(disk);
+    let mut keep = wipe_esp();
+    keep.zero_install = zero_install;
+    keep
 }
 
 fn wipe_esp() -> Keep {
     loop {
         let mib = ask_num("EFI partition MiB (1024 recommended, 300 minimum)", 1024);
         if mib >= 300 {
-            return Keep { dual: false, esp_part: None, free_start: 1, boot_mib: mib, format_esp: false };
+            return Keep {
+                dual: false,
+                esp_part: None,
+                free_start: 1,
+                boot_mib: mib,
+                format_esp: false,
+                zero_install: false,
+            };
         }
         warn("the EFI partition needs at least 300 MiB");
     }
@@ -456,9 +503,48 @@ fn ask_disk() -> String {
     disk
 }
 
+fn ask_extras(install: &str) -> Vec<ExtraDisk> {
+    let others = disk::disks()
+        .into_iter()
+        .map(|name| format!("/dev/{}", name))
+        .filter(|dev| dev != install)
+        .collect::<Vec<_>>();
+    if others.is_empty() {
+        return Vec::new();
+    }
+    let checked = vec![false; others.len()];
+    let mut extras = Vec::new();
+    for dev in pick_many("Erase or format other disks", &others, &checked) {
+        let zero = ask_yes(&format!("Overwrite {} with zeros first? (slow)", dev), false);
+        let fs = pick(&format!("Filesystem on {}", dev), &EXTRA_FS, 0);
+        if !zero && fs == ExtraFs::None {
+            warn(&format!("nothing selected for {}, skipping", dev));
+            continue;
+        }
+        let luks = fs != ExtraFs::None && ask_yes(&format!("Encrypt {} with LUKS2?", dev), false);
+        let after = if fs == ExtraFs::None {
+            "leave it unpartitioned".to_string()
+        } else {
+            format!("create {}", fs)
+        };
+        warn(&format!(
+            "This erases ALL of {}: {}{}",
+            dev,
+            if zero { "overwrite with zeros, then " } else { "" },
+            after
+        ));
+        if ask(&format!("Type {} to confirm", dev)) != dev {
+            die("aborted");
+        }
+        extras.push(ExtraDisk { dev, zero, fs, luks });
+    }
+    extras
+}
+
 fn show_plan(disk: &str, total_mib: u64, layout: &Layout, fs: Fs, luks: bool) {
     say(&format!("Plan on {} ({} GiB)", disk, total_mib / 1024));
     item("keep existing", if layout.dual { "yes" } else { "no, full wipe" });
+    item("zero overwrite", if layout.zero_install { "yes, install disk" } else { "no" });
     item("encryption", if luks { "LUKS2 on root" } else { "none" });
     item("filesystem", &fs.to_string());
     if let Some(e) = &layout.esp_part {
