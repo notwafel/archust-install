@@ -141,9 +141,9 @@ and partition count, and marks a disk `in use` when any partition is mounted or 
 
 ```text
 Always:
-  base base-devel linux-headers linux-firmware dkms locales
+  base base-devel linux-firmware dkms locales
   grub efibootmgr dosfstools mtools networkmanager sudo
-  selected kernel; selected CPU microcode
+  selected kernel and its headers; selected CPU microcode
 
 Selected GPU:
   Intel: vulkan-intel intel-media-driver
@@ -180,9 +180,9 @@ OpenGL, Vulkan and video-acceleration tooling. `Firmware` adds `linux-firmware-i
 `linux-firmware-nvidia` when the GPU is NVIDIA or nouveau. A VM has none of that hardware, so it
 gets no firmware group at all.
 
-`linux-headers` is always installed, including with `linux-lts` and `linux-zen`. It does not add
-matching `linux-lts-headers` or `linux-zen-headers`; do that manually before using DKMS on either
-kernel.
+The selected kernel's headers are installed with it: `linux-headers`, `linux-lts-headers` or
+`linux-zen-headers`. That is what `nvidia-dkms` and `nvidia-open-dkms` build against, so NVIDIA
+on `linux-lts` or `linux-zen` works without adding headers by hand.
 
 CPU microcode is its own prompt and is independent of the GPU: an AMD CPU with an NVIDIA card
 gets `amd-ucode` plus the NVIDIA packages, an Intel CPU with an AMD card gets `intel-ucode` plus
@@ -285,7 +285,7 @@ Pipeline: partition -> format -> LUKS -> mount -> pacstrap + fstab -> configure.
 ./archust_install.sh --check
 ```
 
-Runs the partition arithmetic on fixed cases (wipe, dualboot, swap, fixed root) and rejection cases (oversized root, tiny disk, EFI under 300 MiB). Fails on overlap, overflow, or a plan that does not end with root. `cargo test` covers the kernel command line (xfs, btrfs, LUKS), the initramfs hook order, the `[multilib]` uncommenting, the two `reflector` renderings, the 1 MiB end margin that keeps `parted` inside the device, and the UTF-8 locale parser.
+Runs the partition arithmetic on fixed cases (wipe, dualboot, swap, fixed root) and rejection cases (oversized root, tiny disk, EFI under 300 MiB). Fails on overlap, overflow, or a plan that does not end with root. `cargo test` covers the kernel command line (xfs, btrfs, LUKS), the initramfs hook order, the `[multilib]` uncommenting, the two `reflector` renderings, the 1 MiB end margin that keeps `parted` inside the device, the dualboot free-space arithmetic, the `parted`/`lsblk` parsers, the selected kernel headers, and the UTF-8 locale parser.
 
 ![Self-check: accepts wipe, dualboot, swap, fixed root; rejects oversized root, tiny disk, EFI under 300 MiB; fails on overlap, overflow, a plan not ending with root](assets/selfcheck-dark.svg#gh-dark-mode-only)
 ![Self-check: accepts wipe, dualboot, swap, fixed root; rejects oversized root, tiny disk, EFI under 300 MiB; fails on overlap, overflow, a plan not ending with root](assets/selfcheck-light.svg#gh-light-mode-only)

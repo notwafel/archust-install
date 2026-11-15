@@ -18,6 +18,12 @@ versions follow [Semantic Versioning](https://semver.org/).
   Only `[SWAP]` mountpoints are switched off now.
 - **The disk picker listed `loop` devices.** The live ISO's squashfs loops and `rom` devices were
   offered as install targets. Only `disk` rows are shown.
+- **NVIDIA DKMS did not build for `linux-lts` or `linux-zen`.** Only `linux-headers` was
+  installed, so `nvidia-dkms` and `nvidia-open-dkms` had no headers for the selected kernel.
+  The matching header package is installed with the kernel.
+- **The launcher ignored a `Cargo.lock` change.** `archust_install.sh` compared only `src/` and
+  `Cargo.toml` with the release binary, so a lockfile-only update ran stale code. `Cargo.lock` is
+  now part of the rebuild check.
 
 ## [0.2.7] - 2026-11-15
 

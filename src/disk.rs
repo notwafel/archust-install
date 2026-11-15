@@ -148,7 +148,9 @@ pub fn has_partitions(disk: &str) -> bool {
 
 /// Last used MiB + 2: one MiB alignment gap, parted ends are inclusive.
 pub fn free_start(disk: &str) -> u64 {
-    last_end_from_table(&table(disk)) + 2
+    let table = out("parted", &["-sm", disk, "unit", "MiB", "print"])
+        .unwrap_or_else(|| die("cannot read the partition table"));
+    last_end_from_table(&table) + 2
 }
 
 /// `parted -sm` partition rows start with the partition number; the disk row starts with `/dev/`.

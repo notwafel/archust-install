@@ -23,9 +23,8 @@
 
 ## Build and dependency gotcha
 
-- `archust_install.sh` rebuild detection checks only `src/` and `Cargo.toml`, not `Cargo.lock`.
-  After changing dependency resolution or lockfile-only content, run `cargo build --release --locked`
-  directly or remove `target/release/archust-install` before testing the launcher.
+- `archust_install.sh` rebuilds when `src/`, `Cargo.toml` or `Cargo.lock` is newer than the release
+  binary.
 
 ## Docs, assets and releases
 

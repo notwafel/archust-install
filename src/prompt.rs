@@ -22,8 +22,8 @@ const ZONES: [&str; 15] = [
     "Asia/Tokyo", "Australia/Sydney",
 ];
 
-const BASE: [&str; 12] = [
-    "base", "base-devel", "linux-headers", "linux-firmware", "dkms", "locales",
+const BASE: [&str; 11] = [
+    "base", "base-devel", "linux-firmware", "dkms", "locales",
     "grub", "efibootmgr", "dosfstools", "mtools", "networkmanager", "sudo",
 ];
 
@@ -123,6 +123,9 @@ pub fn ask_everything() -> Config {
     let mut packages = BASE.to_vec();
     packages.extend(extras);
     packages.push(kernel);
+    // nvidia-dkms/nvidia-open-dkms build against the installed kernel, so its headers must
+    // match the selected kernel, not blindly the `linux` package
+    packages.push(kernel_headers(kernel));
     packages.extend(gpu.packages());
     // hybrid laptop: without this the integrated GPU gets no Vulkan/VA driver at all
     if matches!(gpu, detect::Gpu::Nvidia | detect::Gpu::NvidiaOpen | detect::Gpu::Nouveau)
@@ -278,6 +281,15 @@ fn shell_package(shell: &str) -> Option<&'static str> {
     }
 }
 
+/// Headers for the kernel that will actually boot; DKMS builds against these.
+fn kernel_headers(kernel: &str) -> &'static str {
+    match kernel {
+        "linux-lts" => "linux-lts-headers",
+        "linux-zen" => "linux-zen-headers",
+        _ => "linux-headers",
+    }
+}
+
 fn ask_system_options() -> (String, String, String, String) {
     let zones = zone_choices();
     let keymaps = keymap_choices();
@@ -416,7 +428,7 @@ fn show_plan(disk: &str, total_mib: u64, layout: &Layout, fs: Fs, luks: bool) {
 
 #[cfg(test)]
 mod tests {
-    use super::{extras_for, parse_utf8_locales};
+    use super::{extras_for, kernel_headers, parse_utf8_locales};
     use crate::detect::Gpu;
 
     #[test]
@@ -431,5 +443,12 @@ mod tests {
         assert!(!groups(Gpu::Virt).iter().any(|name| name.starts_with("Firmware")));
         assert!(groups(Gpu::Amd).contains(&"Firmware: Intel, Realtek"));
         assert!(groups(Gpu::Nvidia).contains(&"Firmware: Intel, Realtek, NVIDIA"));
+    }
+
+    #[test]
+    fn headers_match_the_selected_kernel() {
+        assert_eq!(kernel_headers("linux"), "linux-headers");
+        assert_eq!(kernel_headers("linux-lts"), "linux-lts-headers");
+        assert_eq!(kernel_headers("linux-zen"), "linux-zen-headers");
     }
 }

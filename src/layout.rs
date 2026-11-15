@@ -128,7 +128,7 @@ pub fn self_check() -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{plan, Request};
+    use super::{free_mib, plan, Request};
 
     fn last_end(total_mib: u64, boot_mib: u64, swap_mib: u64, free_start: u64, dual: bool) -> u64 {
         let parts = plan(Request { total_mib, boot_mib, swap_mib, root_mib: 0, dualboot: dual, free_start })
@@ -144,5 +144,19 @@ mod tests {
             assert!(last_end(total, 1024, 16384, 1, false) + 1 < total);
             assert!(last_end(total, 0, 0, total / 2, true) + 1 < total);
         }
+    }
+
+    #[test]
+    fn free_space_equals_the_planned_root() {
+        let r = Request {
+            total_mib: 204800,
+            boot_mib: 0,
+            swap_mib: 0,
+            root_mib: 0,
+            dualboot: true,
+            free_start: 102401,
+        };
+        let parts = plan(r).expect("dualboot fits");
+        assert_eq!(parts.last().unwrap().size(), free_mib(&r));
     }
 }

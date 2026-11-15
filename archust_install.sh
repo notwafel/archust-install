@@ -5,7 +5,7 @@
 set -eu
 cd "$(dirname "$0")"
 
-if [ ! -x target/release/archust-install ] || [ -n "$(find src Cargo.toml -newer target/release/archust-install 2>/dev/null)" ]; then
+if [ ! -x target/release/archust-install ] || [ -n "$(find src Cargo.toml Cargo.lock -newer target/release/archust-install 2>/dev/null)" ]; then
 	command -v cargo >/dev/null || { echo "cargo not found (pacman -S rust)" >&2; exit 1; }
 	cargo build --release --locked
 fi
