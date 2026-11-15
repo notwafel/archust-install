@@ -63,7 +63,12 @@ pub fn mount(cfg: &Config, fs: &Formatted, root: &str) {
     }
     // grub-mkconfig probes /boot; without this it may see the live ISO's own fstab entries
     stdfs::create_dir_all(format!("{}/boot", MNT)).ok();
-    sh("mount", &[&fs.esp, &format!("{}/boot", MNT)]);
+    // -t vfat fails with a clear message when the module is missing; without it mount probes
+    // ext2/ext3 first and only then reports "unknown filesystem type 'vfat'"
+    if !crate::sys::modprobe("vfat") {
+        die("vfat kernel module missing for the running kernel - reboot the live ISO, do not pacman -Syu it");
+    }
+    sh("mount", &["-t", "vfat", &fs.esp, &format!("{}/boot", MNT)]);
 }
 
 /// UUID of the root filesystem (LUKS mapper when encrypted).

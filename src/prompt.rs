@@ -27,8 +27,9 @@ const BASE: [&str; 12] = [
     "grub", "efibootmgr", "dosfstools", "mtools", "networkmanager", "sudo",
 ];
 
-/// Optional groups, pre-ticked. Unchecked ones are not installed.
-const EXTRAS: [(&str, &str); 9] = [
+/// Optional groups, pre-ticked. Unchecked ones are not installed. Firmware is not here:
+/// it depends on the selected GPU, see `extras_for`.
+const EXTRAS: [(&str, &str); 8] = [
     ("Nano editor", "nano"),
     ("curl", "curl"),
     ("git", "git"),
@@ -37,9 +38,25 @@ const EXTRAS: [(&str, &str); 9] = [
     ("Manual pages", "man-db"),
     ("Reflector mirrors", "reflector"),
     ("Graphics: Mesa, Vulkan, VA tools", "mesa vulkan-icd-loader libva-utils"),
-    // extra firmware: laptops and new Wi-Fi cards need these, plain linux-firmware is not enough
-    ("Firmware: Intel, Realtek, NVIDIA", "linux-firmware-intel linux-firmware-realtek linux-firmware-nvidia"),
 ];
+
+/// `linux-firmware-intel` and `-realtek` cover Wi-Fi, Ethernet and Bluetooth chips, not only
+/// GPUs, so only the NVIDIA blob and the VM case follow the GPU answer.
+fn extras_for(gpu: detect::Gpu) -> Vec<(&'static str, &'static str)> {
+    let mut groups = EXTRAS.to_vec();
+    match gpu {
+        detect::Gpu::Virt => {}
+        detect::Gpu::Nvidia | detect::Gpu::NvidiaOpen | detect::Gpu::Nouveau => groups.push((
+            "Firmware: Intel, Realtek, NVIDIA",
+            "linux-firmware-intel linux-firmware-realtek linux-firmware-nvidia",
+        )),
+        detect::Gpu::Intel | detect::Gpu::Amd => groups.push((
+            "Firmware: Intel, Realtek",
+            "linux-firmware-intel linux-firmware-realtek",
+        )),
+    }
+    groups
+}
 
 const MULTILIB: [&str; 5] = ["lib32-mesa", "lib32-vulkan-icd-loader", "lib32-libva", "lib32-alsa-plugins", "lib32-gnutls"];
 
@@ -82,11 +99,12 @@ pub fn ask_everything() -> Config {
     step(6, STEPS, "Packages");
     let multilib = ask_yes("Enable multilib (32-bit libs, Steam/Wine/games)?", true);
     let wayland = ask_yes("Wayland + XWayland stack now (ready for a compositor)?", true);
-    let groups = EXTRAS.iter().map(|(name, _)| *name).collect::<Vec<_>>();
+    let extras_groups = extras_for(gpu);
+    let groups = extras_groups.iter().map(|(name, _)| *name).collect::<Vec<_>>();
     let checked = vec![true; groups.len()];
     let mut extras: Vec<&str> = Vec::new();
     for name in pick_many("Extra packages", &groups, &checked) {
-        if let Some((_, pkgs)) = EXTRAS.iter().find(|(n, _)| *n == name) {
+        if let Some((_, pkgs)) = extras_groups.iter().find(|(n, _)| *n == name) {
             extras.extend(pkgs.split(' '));
         }
     }
@@ -166,6 +184,14 @@ fn ask_layout(disk: &str, total_mib: u64) -> Layout {
             let free = disk::free_mib(disk, total_mib);
             match disk::existing_esp(disk) {
                 Some(esp) if free >= 16384 => {
+                    let kind = disk::fs_type(&esp);
+                    if kind != "vfat" {
+                        die(&format!(
+                            "{} is {} - the installer needs a FAT32 ESP, format it or pick another disk",
+                            esp,
+                            if kind.is_empty() { "unformatted" } else { &kind }
+                        ));
+                    }
                     say(&format!("reusing {} as /boot", esp));
                     item("free space", &format!("{} MiB", free));
                     Keep { dual: true, esp_part: Some(esp), free_start: disk::free_start(disk), boot_mib: 0 }
@@ -380,11 +406,20 @@ fn show_plan(disk: &str, total_mib: u64, layout: &Layout, fs: Fs, luks: bool) {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_utf8_locales;
+    use super::{extras_for, parse_utf8_locales};
+    use crate::detect::Gpu;
 
     #[test]
     fn lists_only_utf8_locale_names() {
         let locales = parse_utf8_locales("#en_US.UTF-8 UTF-8\npl_PL.UTF-8 UTF-8\n#de_DE ISO-8859-1\n");
         assert_eq!(locales, ["en_US", "pl_PL"]);
+    }
+
+    #[test]
+    fn firmware_group_follows_the_gpu() {
+        let groups = |gpu| extras_for(gpu).iter().map(|(name, _)| *name).collect::<Vec<_>>();
+        assert!(!groups(Gpu::Virt).iter().any(|name| name.starts_with("Firmware")));
+        assert!(groups(Gpu::Amd).contains(&"Firmware: Intel, Realtek"));
+        assert!(groups(Gpu::Nvidia).contains(&"Firmware: Intel, Realtek, NVIDIA"));
     }
 }

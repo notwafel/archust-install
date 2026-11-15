@@ -156,6 +156,11 @@ pub fn grow_cowspace() {
     }
 }
 
+/// Loads a kernel module; false when it is not available for the running kernel.
+pub fn modprobe(module: &str) -> bool {
+    quiet_ok("modprobe", &[module])
+}
+
 fn quiet_ok(program: &str, args: &[&str]) -> bool {
     std::process::Command::new(program)
         .args(args)

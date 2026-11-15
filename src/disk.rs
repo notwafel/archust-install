@@ -91,6 +91,14 @@ pub fn existing_esp(disk: &str) -> Option<String> {
         .filter(|s| !s.is_empty() && crate::sys::exists(s))
 }
 
+/// Filesystem blkid sees on a device; empty when it sees none (unformatted or wiped).
+pub fn fs_type(dev: &str) -> String {
+    out("blkid", &["-s", "TYPE", "-o", "value", dev])
+        .unwrap_or_default()
+        .trim()
+        .to_string()
+}
+
 fn partition_numbers(disk: &str) -> Vec<u32> {
     partition_numbers_from_table(&table(disk))
 }

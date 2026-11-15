@@ -82,7 +82,7 @@ re-asked; a wrong typed wipe confirmation aborts.
 | 3 | Sizes | swap GiB, root GiB (`0` = remaining usable space), EFI size for a wipe | `4`, `0`, `1024` MiB |
 | 4 | Filesystem and encryption | btrfs / ext4 / xfs, optional LUKS, then show the plan | btrfs, LUKS off |
 | 5 | Hardware | kernel and GPU driver | `linux`, detected GPU |
-| 6 | Packages | multilib, Wayland + XWayland, nine optional groups | all selected |
+| 6 | Packages | multilib, Wayland + XWayland, optional groups (firmware follows the GPU) | all selected |
 | 7 | System | hostname, username, searchable timezone, keymap, locale and login shell | —, —, UTC, us, en_US, bash |
 | 8 | Passwords | LUKS passphrase when selected, user and root passwords | minimum 8 characters, typed twice |
 
@@ -164,13 +164,17 @@ Selected options:
 
 Preselected optional groups:
   Nano editor · curl · git · Flatpak · PipeWire audio · Manual pages · Reflector mirrors
-  Graphics: Mesa, Vulkan, VA tools · Firmware: Intel, Realtek, NVIDIA
+  Graphics: Mesa, Vulkan, VA tools
+  Firmware: Intel, Realtek, NVIDIA (an NVIDIA GPU) or Intel, Realtek (Intel, AMD)
+  A VM or "no dedicated GPU" gets no Firmware group.
 ```
 
 The optional groups start selected but can be unticked. `PipeWire audio` adds PipeWire and ALSA
 tools. `Graphics` adds `mesa`, `vulkan-icd-loader` and `libva-utils`; it supplies userspace
-OpenGL, Vulkan and video-acceleration tooling. `Firmware` adds `linux-firmware-intel`,
-`linux-firmware-realtek` and `linux-firmware-nvidia` for hardware support.
+OpenGL, Vulkan and video-acceleration tooling. `Firmware` adds `linux-firmware-intel` and
+`linux-firmware-realtek`, which cover Wi-Fi, Ethernet and Bluetooth chips, plus
+`linux-firmware-nvidia` when the GPU is NVIDIA or nouveau. A VM has none of that hardware, so it
+gets no firmware group at all.
 
 `linux-headers` is always installed, including with `linux-lts` and `linux-zen`. It does not add
 matching `linux-lts-headers` or `linux-zen-headers`; do that manually before using DKMS on either
@@ -286,7 +290,8 @@ Runs the partition arithmetic on fixed cases (wipe, dualboot, swap, fixed root) 
 - GPU detection chooses a default only. It does not validate NVIDIA hardware compatibility with
   the selected driver package.
 - Dualboot needs an existing EFI partition and at least 16 GiB after the last partition. No
-  shrinking or resizing of existing partitions.
+  shrinking or resizing of existing partitions. The existing ESP must already be `vfat`; anything
+  else aborts before the disk is touched.
 - No snapshot tool, zram or encrypted swap.
 - Small installer, not general-purpose. Run `--check` and `cargo test` after each edit.
 

@@ -5,6 +5,20 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-11-15
+
+### Fixed
+
+- **EFI partition mount failed with `unknown filesystem type 'vfat'`.** The installer now loads
+  the module with `modprobe vfat` and mounts with an explicit `-t vfat`, so a missing module for
+  the running kernel stops the run with that reason instead of a probing error. A reused ESP is
+  also checked: a non-FAT32 or unformatted partition aborts before the disk is written.
+
+### Changed
+
+- The firmware group follows the GPU answer: no firmware group for a VM, Intel/Realtek for Intel
+  and AMD, plus NVIDIA firmware for NVIDIA and nouveau.
+
 ## [0.2.2] - 2026-11-15
 
 ### Changed

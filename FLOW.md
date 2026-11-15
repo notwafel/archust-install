@@ -118,6 +118,13 @@ this section except the cowspace remount are fatal on failure.
 
    - With existing partitions, dualboot needs an existing `EFI System` partition and at least
      16 GiB after the last partition. Otherwise, the wipe branch is used.
+
+     ```sh
+     blkid -s TYPE -o value <efi-device>
+     ```
+
+     The reused ESP must report `vfat`. Any other or empty type aborts before the disk is
+     written.
    - Wipe requires the exact disk path typed back. EFI size must be at least 300 MiB.
 
 3. **Sizes**
@@ -141,7 +148,8 @@ this section except the cowspace remount are fatal on failure.
 6. **Packages**
    - Multilib default: enabled.
    - Wayland + XWayland default: enabled.
-   - Nine optional groups default: selected.
+   - Optional groups default: selected. The firmware group follows the GPU: none for a VM,
+     Intel/Realtek for Intel and AMD, plus NVIDIA firmware for NVIDIA and nouveau.
 
 7. **System**
    - Hostname and username: lowercase ASCII letters, digits, `-`, `_`; 1–31 characters; no
@@ -235,7 +243,8 @@ mount <root> /mnt                                    # btrfs: temporary top-leve
 btrfs subvolume create /mnt/@                         # btrfs, then @home @log @pkg @snapshots @swp
 umount /mnt                                           # btrfs
 mount -o subvol=@,noatime,compress=zstd:1 <root> /mnt # btrfs
-mount <efi-device> /mnt/boot
+modprobe vfat                                         # fatal if the running kernel has no vfat
+mount -t vfat <efi-device> /mnt/boot
 ```
 
 For btrfs, the temporary top-level mount creates all six subvolumes before mounting `@` as root:
