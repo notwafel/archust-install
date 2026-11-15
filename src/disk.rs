@@ -23,6 +23,41 @@ pub fn disks() -> Vec<String> {
         .collect()
 }
 
+/// Raw `lsblk` rows: NAME, FSTYPE and mountpoints for the disk and its partitions.
+fn listing(disk: &str) -> String {
+    out("lsblk", &["-lno", "NAME,FSTYPE,MOUNTPOINTS", disk]).unwrap_or_default()
+}
+
+/// Splits an `lsblk` listing into active swap devices and mounted partitions. The first row is
+/// the disk itself: no filesystem, no mountpoint, so it falls through both lists.
+fn usage_from(listing: &str) -> (Vec<String>, Vec<String>) {
+    let mut swap = Vec::new();
+    let mut mounted = Vec::new();
+    for line in listing.lines() {
+        let mut fields = line.split_whitespace();
+        let (Some(name), Some(fstype)) = (fields.next(), fields.next()) else { continue };
+        let points = fields.collect::<Vec<_>>();
+        if fstype == "swap" {
+            swap.push(name.to_string());
+        } else if !points.is_empty() {
+            mounted.push(format!("{} on {}", name, points.join(",")));
+        }
+    }
+    (swap, mounted)
+}
+
+/// Parted refuses to relabel a disk whose partitions are mounted or active as swap. Swap is
+/// switched off (the live ISO may have picked it up); a mounted partition aborts the run.
+fn clear_busy(disk: &str) {
+    let (swap, mounted) = usage_from(&listing(disk));
+    for dev in swap {
+        run("swapoff", &[&dev]);
+    }
+    if !mounted.is_empty() {
+        die(&format!("unmount first: {}", mounted.join(", ")));
+    }
+}
+
 /// `PARTED`-style listing for the summary before asking whether to keep it.
 pub fn table(disk: &str) -> String {
     out("parted", &["-sm", disk, "unit", "MiB", "print"]).unwrap_or_default()
@@ -49,14 +84,29 @@ pub fn size_mib(dev: &str) -> u64 {
         / 1048576
 }
 
-/// Whole disks with size and model, for the summary line above the picker.
-pub fn disks_listing() -> String {
-    out("lsblk", &["-dpno", "NAME,SIZE,MODEL"])
-        .unwrap_or_default()
-        .lines()
-        .map(|l| format!("  {}", l))
-        .collect::<Vec<_>>()
-        .join("\n")
+/// One picker line per disk: device, size with model, and what is already on it.
+pub fn menu(names: &[String]) -> Vec<String> {
+    names
+        .iter()
+        .map(|name| {
+            let dev = format!("/dev/{}", name);
+            let details = out("lsblk", &["-dpno", "SIZE,MODEL", &dev])
+                .unwrap_or_default()
+                .trim()
+                .to_string();
+            let listing = listing(&dev);
+            let parts = listing.lines().skip(1).count();
+            let (_, mounted) = usage_from(&listing);
+            let state = if parts == 0 {
+                "empty".to_string()
+            } else if mounted.is_empty() {
+                format!("{} partition{}", parts, if parts == 1 { "" } else { "s" })
+            } else {
+                format!("{} partitions, in use", parts)
+            };
+            format!("{:<13} {:<28} {}", dev, details, state)
+        })
+        .collect()
 }
 
 pub fn describe(disk: &str) -> String {
@@ -112,10 +162,8 @@ fn partition_numbers_from_table(table: &str) -> Vec<u32> {
 /// Writes the plan to disk, returns the device path of each new partition.
 pub fn create(disk: &str, parts: &[Part], dual: bool, root_fs_hint: &str) -> Vec<String> {
     if !dual {
-        // the table is about to go; refuse while anything on the disk is still mounted
-        if out("findmnt", &["-S", disk]).is_some_and(|m| !m.trim().is_empty()) {
-            die(&format!("a partition of {} is mounted, unmount it first", disk));
-        }
+        // the table is about to go; parted refuses a disk with mounted partitions or active swap
+        clear_busy(disk);
         run("parted", &["-s", disk, "mklabel", "gpt"]);
     }
     let mut created = Vec::with_capacity(parts.len());
@@ -159,11 +207,19 @@ pub fn swap_device(parts: &[Part], devices: &[String], hibernate: bool) -> Optio
 
 #[cfg(test)]
 mod tests {
-    use super::partition_numbers_from_table;
+    use super::{partition_numbers_from_table, usage_from};
 
     #[test]
     fn reads_partition_numbers_from_parted_machine_output() {
         let table = "BYT;\n/dev/sda:1024MiB:scsi:512:512:gpt:;\n1:1MiB:513MiB:512MiB:fat32:archust-efi:esp;\n3:514MiB:1023MiB:510MiB:ext4:archust-root:;\n";
         assert_eq!(partition_numbers_from_table(table), [1, 3]);
+    }
+
+    #[test]
+    fn finds_mounted_and_swap_partitions() {
+        let listing = "sda\nsda1 vfat /boot\nsda2 swap [SWAP]\nsda3 ext4 /mnt\nsda4\n";
+        let (swap, mounted) = usage_from(listing);
+        assert_eq!(swap, ["sda2"]);
+        assert_eq!(mounted, ["sda1 on /boot", "sda3 on /mnt"]);
     }
 }

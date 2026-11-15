@@ -5,6 +5,22 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.6] - 2026-11-15
+
+### Fixed
+
+- **`parted mklabel` failed with `Partition(s) on /dev/sda are being used`.** The old guard only
+  matched a mounted source equal to the whole disk, so a mounted partition or active swap was
+  missed. The installer now reads `lsblk -lno NAME,FSTYPE,MOUNTPOINTS`, switches off swap on the
+  disk and aborts with the device and mountpoint of anything still mounted.
+
+### Changed
+
+- The disk picker shows size, model, partition count and `in use` per disk instead of a bare
+  `lsblk` dump, and says what Enter does.
+- The sizes prompts name the recommended values; the root prompt prints how many MiB `0` will
+  take.
+
 ## [0.2.5] - 2026-11-15
 
 ### Changed

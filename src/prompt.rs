@@ -226,9 +226,11 @@ fn ask_layout(disk: &str, total_mib: u64) -> Layout {
     });
     item("usable", &format!("{} MiB{}", space, if dual { " (free space)" } else { "" }));
 
+    note("Recommended: swap 4 GiB, root 0 (all remaining), EFI 1024 MiB.");
     loop {
-        let swap_gib = ask_num("Swap, also for hibernation (GiB, 0 = none)", 4);
-        let root_gib = ask_num("Root (GiB, 0 = rest of the usable space)", 0);
+        let swap_gib = ask_num("Swap GiB, also for hibernation (0 = none, 4 = recommended)", 4);
+        let room = space.saturating_sub(boot_mib).saturating_sub(swap_gib * 1024);
+        let root_gib = ask_num(&format!("Root GiB (0 = all remaining, about {} MiB)", room), 0);
         let parts = plan(Request {
             total_mib,
             boot_mib,
@@ -259,7 +261,7 @@ fn wipe(disk: &str) -> Keep {
 
 fn wipe_esp() -> Keep {
     loop {
-        let mib = ask_num("EFI partition (MiB)", 1024);
+        let mib = ask_num("EFI partition MiB (1024 recommended, 300 minimum)", 1024);
         if mib >= 300 {
             return Keep { dual: false, esp_part: None, free_start: 1, boot_mib: mib };
         }
@@ -382,8 +384,9 @@ fn ask_disk() -> String {
     if found.is_empty() {
         die("no disks found besides the live ISO's own");
     }
-    note(&disk::disks_listing());
-    let disk = format!("/dev/{}", found[pick_disk(&found)]);
+    note("Enter picks the highlighted disk. The live ISO's own disk is hidden.");
+    note("Size, model and partition count come from lsblk; \"in use\" means mounted or swap.");
+    let disk = format!("/dev/{}", found[pick_disk(&disk::menu(&found))]);
     note(&disk::describe(&disk));
     disk
 }

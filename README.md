@@ -77,7 +77,7 @@ re-asked; a wrong typed wipe confirmation aborts.
 
 | step | section | what | default |
 |---|---|---|---|
-| 1 | Disk | select a whole disk; the disk reported as the live ISO boot disk is excluded | first listed disk |
+| 1 | Disk | select a whole disk, shown with size, model, partition count and `in use`; the live ISO boot disk is excluded | first listed disk |
 | 2 | Partitioning | reuse an existing ESP and install after the last partition, or wipe | keep existing partitions when present |
 | 3 | Sizes | swap GiB, root GiB (`0` = remaining usable space), EFI size for a wipe | `4`, `0`, `1024` MiB |
 | 4 | Filesystem and encryption | btrfs / ext4 / xfs, optional LUKS, then show the plan | btrfs, LUKS off |
@@ -94,8 +94,9 @@ Hibernation is offered only when swap is at least RAM and at least 1 GiB. The pr
 yes, so Enter adds the `resume` hook and `resume=UUID=`. After the last answer, the installer
 prints the selected packages and asks `Start the installation?`; its default is no.
 
-Wiping cannot be accepted with Enter: type the disk path exactly. Before `parted mklabel`, the
-installer runs `findmnt -S <disk>` and aborts when it finds a mounted source.
+Wiping cannot be accepted with Enter: type the disk path exactly. The disk menu shows size, model
+and partition count, and marks a disk `in use` when any partition is mounted or swapped on. Before
+`parted mklabel`, active swap on that disk is switched off and a mounted partition aborts the run.
 
 ![Safeguards: typed confirmation, mounted source check, live ISO boot disk excluded, ESP verified, multilib read back, firmware names checked](assets/safeguards-dark.svg#gh-dark-mode-only)
 ![Safeguards: typed confirmation, mounted source check, live ISO boot disk excluded, ESP verified, multilib read back, firmware names checked](assets/safeguards-light.svg#gh-light-mode-only)
@@ -258,7 +259,7 @@ src/prompt.rs            question flow (disk -> sizes -> fs -> LUKS -> kernel ->
 src/term.rs              dialoguer prompts: select, disk picker, multi-select, input, password
 src/ui.rs                say / warn / die / note / step / rule / item
 src/sys.rs               shell wrappers, live-ISO check, mirrors, keys
-src/disk.rs              lsblk/parted: disk list, free space, ESP, findmnt guard, mkpart
+src/disk.rs              lsblk/parted: disk menu, busy check, free space, ESP, mkpart
 src/detect.rs            GPU family and CPU microcode
 src/layout.rs            partition arithmetic (pure, self-tested)
 src/fs.rs                btrfs / ext4 / xfs: mkfs, mount options

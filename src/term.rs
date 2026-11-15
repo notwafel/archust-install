@@ -99,13 +99,12 @@ pub fn pick_many<T: Clone + std::fmt::Display>(name: &str, items: &[T], checked:
     picks.into_iter().map(|i| items[i].clone()).collect()
 }
 
-/// Picks one disk from `lsblk`; returns its name, e.g. `sda` or `nvme0n1`.
-pub fn pick_disk(disks: &[String]) -> usize {
-    let labels: Vec<String> = disks.iter().map(|d| format!("/dev/{}", d)).collect();
+/// Picks one disk from the rendered menu; returns the index into `names`.
+pub fn pick_disk(labels: &[String]) -> usize {
     if labels.is_empty() {
         die("no disks found");
     }
-    finish(Select::new().with_prompt("Install disk").items(&labels).default(0).interact())
+    finish(Select::new().with_prompt("Install disk").items(labels).default(0).interact())
 }
 
 /// Hidden input, asked twice; empty, short or mismatched just asks again.

@@ -129,7 +129,8 @@ this section except the cowspace remount are fatal on failure.
 
 3. **Sizes**
    - Swap default: 4 GiB.
-   - Root default: all remaining usable space.
+   - Root default: all remaining usable space; the prompt prints how many MiB that is.
+   - EFI default: 1024 MiB, minimum 300 MiB.
    - Hibernation prompt appears only when swap is at least detected RAM and at least 1 GiB.
 
 4. **Filesystem and encryption**
@@ -174,13 +175,14 @@ Start the installation? [default: no]
 
 ## 3. Partition creation
 
-Full wipe first checks:
+Full wipe first reads the partitions of the disk:
 
 ```sh
-findmnt -S <disk>
+lsblk -lno NAME,FSTYPE,MOUNTPOINTS <disk>
 ```
 
-A non-empty result aborts. Then it runs:
+A partition with `FSTYPE=swap` is switched off with `swapoff <device>`; a mounted partition aborts
+with its device and mountpoint. Then it runs:
 
 ```sh
 parted -s <disk> mklabel gpt
