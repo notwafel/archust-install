@@ -5,6 +5,14 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-11-15
+
+### Changed
+
+- README matches the code again: `pacman -Sy --needed` instead of `-Syu` on the live ISO, the
+  installer's own `--latest 10` mirror refresh, hibernation defaulting to yes, the package list
+  printed once after all answers, and the 300 MiB EFI minimum applying to new partitions only.
+
 ## [0.2.1] - 2026-11-15
 
 ### Fixed

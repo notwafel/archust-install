@@ -32,8 +32,8 @@ On the Arch live ISO, as root, with the network up:
 
 ```sh
 mount -o remount,size=4G /run/archiso/cowspace      # live ISO ships a tiny copy-on-write layer
-sudo reflector --country Poland,Germany,Czechia --protocol https --latest 20 --sort rate --save /etc/pacman.d/mirrorlist      # u can use without --country flag
-pacman -Syu --noconfirm rust git
+sudo reflector --country Poland,Germany,Czechia --protocol https --latest 10 --sort rate --save /etc/pacman.d/mirrorlist      # u can use without --country flag
+pacman -Sy --needed --noconfirm rust git
 git clone https://github.com/notwafel/archust-install && cd archust-install
 ./archust_install.sh
 ```
@@ -41,6 +41,9 @@ git clone https://github.com/notwafel/archust-install && cd archust-install
 `archust_install.sh` builds `target/release/archust-install` with `cargo build --release --locked`
 when `src/` or `Cargo.toml` changed, then execs it. `--locked` keeps the committed dependency
 versions; first builds can still need crates.io to download uncached dependencies.
+
+The installer repeats the mirror step itself before any prompt, using its own trusted-country list
+and `--latest 10`, so the manual `reflector` run only has to carry `pacman -Sy rust git`.
 
 ## Header
 
@@ -84,11 +87,12 @@ re-asked; a wrong typed wipe confirmation aborts.
 | 8 | Passwords | LUKS passphrase when selected, user and root passwords | minimum 8 characters, typed twice |
 
 The dualboot branch requires an existing ESP and at least 16 GiB after the last partition. An
-empty disk always takes the wipe branch. The EFI partition must be at least 300 MiB.
+empty disk always takes the wipe branch. A newly created EFI partition must be at least 300 MiB;
+an existing one is reused as is.
 
-Hibernation is offered only when swap is at least RAM and at least 1 GiB. It is off unless you
-accept the prompt. After every answer, the installer prints the selected packages and asks `Start
-the installation?`; its default is no.
+Hibernation is offered only when swap is at least RAM and at least 1 GiB. The prompt defaults to
+yes, so Enter adds the `resume` hook and `resume=UUID=`. After the last answer, the installer
+prints the selected packages and asks `Start the installation?`; its default is no.
 
 Wiping cannot be accepted with Enter: type the disk path exactly. Before `parted mklabel`, the
 installer runs `findmnt -S <disk>` and aborts when it finds a mounted source.
@@ -268,7 +272,7 @@ Pipeline: partition -> format -> LUKS -> mount -> pacstrap + fstab -> configure.
 ./archust_install.sh --check
 ```
 
-Runs the partition arithmetic on fixed cases (wipe, dualboot, swap, fixed root) and rejection cases (oversized root, tiny disk, EFI under 300 MiB). Fails on overlap, overflow, or a plan that does not end with root. `cargo test` covers the kernel command line (xfs, btrfs, LUKS), the initramfs hook order, the `[multilib]` uncommenting and the two `reflector` renderings.
+Runs the partition arithmetic on fixed cases (wipe, dualboot, swap, fixed root) and rejection cases (oversized root, tiny disk, EFI under 300 MiB). Fails on overlap, overflow, or a plan that does not end with root. `cargo test` covers the kernel command line (xfs, btrfs, LUKS), the initramfs hook order, the `[multilib]` uncommenting, the two `reflector` renderings, the 1 MiB end margin that keeps `parted` inside the device, and the UTF-8 locale parser.
 
 ![Self-check: accepts wipe, dualboot, swap, fixed root; rejects oversized root, tiny disk, EFI under 300 MiB; fails on overlap, overflow, a plan not ending with root](assets/selfcheck-dark.svg#gh-dark-mode-only)
 ![Self-check: accepts wipe, dualboot, swap, fixed root; rejects oversized root, tiny disk, EFI under 300 MiB; fails on overlap, overflow, a plan not ending with root](assets/selfcheck-light.svg#gh-light-mode-only)
