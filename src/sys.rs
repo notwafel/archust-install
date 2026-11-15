@@ -147,7 +147,7 @@ pub fn grow_cowspace() {
         .and_then(|s| s.lines().nth(1).map(|v| v.trim().to_string()))
         .and_then(|v| v.parse::<u64>().ok())
         .unwrap_or(0);
-    if avail >= 2 * 1024 * 1024 {
+    if avail >= 2 * 1024 * 1024 * 1024 {
         return;
     }
     crate::ui::say("cowspace: remounting /run/archiso/cowspace with size=4G");

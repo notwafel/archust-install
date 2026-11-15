@@ -6,10 +6,21 @@ use crate::ui::die;
 
 /// Name of the disk the ISO boots from, e.g. `sdb`. Never offered in the picker.
 fn boot_disk() -> Option<String> {
-    let booted = out("lsblk", &["-no", "PKNAME", "/run/archiso/bootmnt"])
-        .or_else(|| out("lsblk", &["-no", "PKNAME", "-J", "/dev/disk/by-label/ARCH"]))
-        .unwrap_or_default();
-    booted.lines().map(|l| l.trim().to_string()).find(|l| !l.is_empty())
+    // PKNAME is the whole disk behind the booted partition; a dd'd ISO has the label on a disk
+    for dev in ["/run/archiso/bootmnt", "/dev/disk/by-label/ARCH"] {
+        if let Some(pk) = out("lsblk", &["-no", "PKNAME", dev]).and_then(|s| first_word(&s)) {
+            return Some(pk);
+        }
+        let row = out("lsblk", &["-dno", "TYPE,NAME", dev]).unwrap_or_default();
+        if let Some(name) = row.strip_prefix("disk").and_then(first_word) {
+            return Some(name);
+        }
+    }
+    None
+}
+
+fn first_word(s: &str) -> Option<String> {
+    s.split_whitespace().next().map(str::to_string)
 }
 
 /// Whole disks, ready for the `Select` picker. The live ISO's own disk is left out.
@@ -25,7 +36,8 @@ pub fn disks() -> Vec<String> {
 
 /// Raw `lsblk` rows: NAME, FSTYPE and mountpoints for the disk and its partitions.
 fn listing(disk: &str) -> String {
-    out("lsblk", &["-lno", "NAME,FSTYPE,MOUNTPOINTS", disk]).unwrap_or_default()
+    // -p: device paths, or `swapoff sda2` fails with "No such file or directory"
+    out("lsblk", &["-lpno", "NAME,FSTYPE,MOUNTPOINTS", disk]).unwrap_or_default()
 }
 
 /// Splits an `lsblk` listing into active swap devices and mounted partitions. The first row is
@@ -217,9 +229,9 @@ mod tests {
 
     #[test]
     fn finds_mounted_and_swap_partitions() {
-        let listing = "sda\nsda1 vfat /boot\nsda2 swap [SWAP]\nsda3 ext4 /mnt\nsda4\n";
+        let listing = "/dev/sda\n/dev/sda1 vfat /boot\n/dev/sda2 swap [SWAP]\n/dev/sda3 ext4 /mnt\n/dev/sda4\n";
         let (swap, mounted) = usage_from(listing);
-        assert_eq!(swap, ["sda2"]);
-        assert_eq!(mounted, ["sda1 on /boot", "sda3 on /mnt"]);
+        assert_eq!(swap, ["/dev/sda2"]);
+        assert_eq!(mounted, ["/dev/sda1 on /boot", "/dev/sda3 on /mnt"]);
     }
 }

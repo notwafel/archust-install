@@ -5,7 +5,7 @@ use crate::steps::luks;
 use crate::sys::{chroot, quiet, with_stdin, write_file};
 use crate::ui::{die, say};
 
-pub fn configure(cfg: &Config, root_dev: &str, swap: &Option<(String, bool)>) {
+pub fn configure(cfg: &Config, root_dev: &str, raw_dev: &str, swap: &Option<(String, bool)>) {
     say("System configuration");
 
     write_file("/etc/locale.gen", &format!("en_US.UTF-8 UTF-8\n{}.UTF-8 UTF-8\n", cfg.locale));
@@ -21,8 +21,10 @@ pub fn configure(cfg: &Config, root_dev: &str, swap: &Option<(String, bool)>) {
     // 99- beats the 50- default, so core dumps never write to (possibly slow) disk
     write_file("/etc/sysctl.d/99-no-core-dumps.conf", "kernel.core_pattern = |/bin/false\n");
 
+    // the LUKS header lives on the raw partition; the mapper has the filesystem UUID
+    let crypt_uuid = if cfg.luks { crate::steps::filesystems::root_uuid(raw_dev) } else { String::new() };
     let root_uuid = crate::steps::filesystems::root_uuid(root_dev);
-    write_file("/etc/default/grub", &grub_default(cfg, &root_uuid));
+    write_file("/etc/default/grub", &grub_default(cfg, &root_uuid, &crypt_uuid));
 
     let hibernate = matches!(swap, Some((_, true)));
     if cfg.luks || hibernate {
@@ -88,14 +90,14 @@ fn hooks_line(cfg: &Config, hibernate: bool) -> String {
     )
 }
 
-fn grub_default(cfg: &Config, root_uuid: &str) -> String {
+fn grub_default(cfg: &Config, root_uuid: &str, crypt_uuid: &str) -> String {
     let mut cmdline = String::from("loglevel=3 quiet rw");
     let rootflags = if cfg.fs.is_btrfs() { " rootflags=subvol=@" } else { "" };
     let fstype = format!(" rootfstype={}", cfg.fs.key());
     if cfg.luks {
         cmdline.push_str(&format!(
             " cryptdevice=UUID={}:{} root=/dev/mapper/{}{}{}",
-            root_uuid, luks::MAPPER, luks::MAPPER, fstype, rootflags
+            crypt_uuid, luks::MAPPER, luks::MAPPER, fstype, rootflags
         ));
     } else {
         cmdline.push_str(&format!(" root=UUID={}{}{}", root_uuid, fstype, rootflags));
@@ -145,13 +147,14 @@ mod tests {
     /// A wrong word here is an unbootable system, so pin the xfs and btrfs shapes.
     #[test]
     fn grub_line_matches_the_filesystem() {
-        let xfs = grub_default(&cfg(fs::Fs::Xfs, false), "1111");
+        let xfs = grub_default(&cfg(fs::Fs::Xfs, false), "1111", "");
         assert!(xfs.contains("root=UUID=1111 rootfstype=xfs"));
         assert!(!xfs.contains("rootflags="));
-        let btrfs = grub_default(&cfg(fs::Fs::Btrfs, false), "1111");
+        let btrfs = grub_default(&cfg(fs::Fs::Btrfs, false), "1111", "");
         assert!(btrfs.contains("rootfstype=btrfs rootflags=subvol=@"));
-        let luks = grub_default(&cfg(fs::Fs::Ext4, true), "1111");
-        assert!(luks.contains("cryptdevice=UUID=1111:root root=/dev/mapper/root rootfstype=ext4"));
+        // cryptdevice takes the LUKS container UUID, not the filesystem UUID inside the mapper
+        let luks = grub_default(&cfg(fs::Fs::Ext4, true), "fs-uuid", "luks-uuid");
+        assert!(luks.contains("cryptdevice=UUID=luks-uuid:root root=/dev/mapper/root rootfstype=ext4"));
     }
 
     /// encrypt unlocks the device, resume must come after it or the swap is not readable yet.

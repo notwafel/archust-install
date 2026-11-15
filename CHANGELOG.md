@@ -5,6 +5,21 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.7] - 2026-11-15
+
+### Fixed
+
+- **`swapoff sda2 failed: No such file or directory`.** `lsblk -lno` prints bare names, so the
+  device path was missing. The listing uses `-p` now and the wipe releases `/dev/sda2`.
+- **LUKS installs wrote the wrong `cryptdevice=` UUID.** The GRUB command line used the UUID of
+  the filesystem inside the mapper, so the initramfs could not open the container. It now uses
+  the UUID of the raw LUKS partition and keeps the mapper UUID for `root=`.
+- **cowspace was remounted at the wrong threshold.** The check compared bytes against 2 MiB, not
+  2 GiB, so a live ISO with almost no space left skipped the remount.
+- **The boot disk could stay in the picker.** The fallback read `lsblk -J` output as plain text,
+  so the live disk name was never matched. It now reads `PKNAME` and handles an ISO written
+  directly to a disk.
+
 ## [0.2.6] - 2026-11-15
 
 ### Fixed

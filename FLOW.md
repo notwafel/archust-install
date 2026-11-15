@@ -91,7 +91,8 @@ this section except the cowspace remount are fatal on failure.
 
      ```sh
      lsblk -no PKNAME /run/archiso/bootmnt
-     lsblk -no PKNAME -J /dev/disk/by-label/ARCH    # fallback
+     lsblk -no PKNAME /dev/disk/by-label/ARCH       # fallback
+     lsblk -dno TYPE,NAME /dev/disk/by-label/ARCH   # fallback for a dd'd ISO
      ```
 
    - List choices and inspect selected disk:
@@ -178,10 +179,11 @@ Start the installation? [default: no]
 Full wipe first reads the partitions of the disk:
 
 ```sh
-lsblk -lno NAME,FSTYPE,MOUNTPOINTS <disk>
+lsblk -lpno NAME,FSTYPE,MOUNTPOINTS <disk>
 ```
 
-A partition with `FSTYPE=swap` is switched off with `swapoff <device>`; a mounted partition aborts
+A partition with `FSTYPE=swap` is switched off with `swapoff <device>` (`-p` makes the names
+absolute); a mounted partition aborts
 with its device and mountpoint. Then it runs:
 
 ```sh

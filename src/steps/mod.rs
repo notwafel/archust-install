@@ -23,5 +23,5 @@ pub fn install(cfg: &Config) {
     };
     filesystems::mount(cfg, &fs, &root);
     pacstrap::base(cfg, &swap);
-    configure::configure(cfg, &root, &swap);
+    configure::configure(cfg, &root, &fs.root_raw, &swap);
 }
