@@ -56,8 +56,8 @@ pub fn plan(r: Request) -> Option<Vec<Part>> {
         parts.push(Part { role: Role::Swap, start: s, end: e });
         s = e + 1;
     }
-    let e = if r.root_mib > 0 { s + r.root_mib - 1 } else { r.total_mib - 1 };
-    if e >= r.total_mib || e < s {
+    let e = if r.root_mib > 0 { s + r.root_mib - 1 } else { r.total_mib - 2 };
+    if e >= r.total_mib - 1 || e < s {
         return None;
     }
     parts.push(Part { role: Role::Root, start: s, end: e });
@@ -75,6 +75,7 @@ fn valid(parts: &[Part], total: u64) -> bool {
         && parts.windows(2).all(|w| w[0].end < w[1].start)
         && parts.last().is_some_and(|p| p.end < total)
 }
+
 
 pub fn self_check() -> bool {
     let cases = [
@@ -122,4 +123,25 @@ pub fn self_check() -> bool {
         }
     }
     ok
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{plan, Request};
+
+    fn last_end(total_mib: u64, boot_mib: u64, swap_mib: u64, free_start: u64, dual: bool) -> u64 {
+        let parts = plan(Request { total_mib, boot_mib, swap_mib, root_mib: 0, dualboot: dual, free_start })
+            .expect("plan fits");
+        parts.last().unwrap().end
+    }
+
+    #[test]
+    fn root_leaves_a_mebibyte_for_the_backup_gpt() {
+        // disk::create passes end + 1 to parted, and parted rejects a location at the device size
+        for total in [81920, 204800] {
+            assert!(last_end(total, 1024, 0, 1, false) + 1 < total);
+            assert!(last_end(total, 1024, 16384, 1, false) + 1 < total);
+            assert!(last_end(total, 0, 0, total / 2, true) + 1 < total);
+        }
+    }
 }

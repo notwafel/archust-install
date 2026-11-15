@@ -189,7 +189,9 @@ udevadm settle                                    # EFI only
 ```
 
 The second `parted` table must contain exactly one new partition number. `udevadm settle` waits
-for device nodes before later format commands. Device paths are derived as:
+for device nodes before later format commands. The root partition stops at `total - 2` MiB, so
+`end-plus-one` stays below the device size and clear of the backup GPT. Device paths are derived
+as:
 
 ```text
 /dev/sda + 1       = /dev/sda1

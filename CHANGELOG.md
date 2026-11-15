@@ -5,6 +5,14 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-11-15
+
+### Fixed
+
+- **Root partition ended at the device size.** The plan used `total - 1` and `disk::create`
+  passes `end + 1` to `parted`, so an 80 GiB disk produced `mkpart ... 81920MiB` and parted
+  rejected it as outside the device. The root now ends at `total - 2` MiB.
+
 ## [0.2.0] - 2026-11-15
 
 ### Fixed
