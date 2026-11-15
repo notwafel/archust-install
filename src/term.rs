@@ -3,7 +3,7 @@
 //! Nothing exits on a bad answer - `Input` re-asks via its validator, menus always yield a value.
 
 use crate::ui::{die, warn};
-use dialoguer::{Confirm, Input, Password, Select};
+use dialoguer::{Confirm, FuzzySelect, Input, Password, Select};
 
 fn finish<T>(r: dialoguer::Result<T>) -> T {
     r.unwrap_or_else(|e| die(&format!("input aborted: {}", e)))
@@ -73,6 +73,16 @@ pub fn pick<T: Clone + std::fmt::Display>(name: &str, items: &[T], default: usiz
     let labels: Vec<String> = items.iter().map(|i| i.to_string()).collect();
     let idx = finish(Select::new().with_prompt(name).items(&labels).default(default).interact());
     items[idx].clone()
+}
+
+/// Searchable menu. `Esc` returns `None`, so the caller can reopen the previous field.
+pub fn pick_fuzzy<T: Clone + std::fmt::Display>(name: &str, items: &[T], default: usize) -> Option<T> {
+    if items.is_empty() {
+        die(&format!("{}: nothing to choose from", name));
+    }
+    let labels: Vec<String> = items.iter().map(|i| i.to_string()).collect();
+    finish(FuzzySelect::new().with_prompt(name).items(&labels).default(default).interact_opt())
+        .map(|idx| items[idx].clone())
 }
 
 /// Multi-choice, `[ ]`/`[x]`; space toggles, Enter accepts.

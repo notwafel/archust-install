@@ -146,7 +146,9 @@ this section except the cowspace remount are fatal on failure.
 7. **System**
    - Hostname and username: lowercase ASCII letters, digits, `-`, `_`; 1–31 characters; no
      leading digit.
-   - Timezone, keymap, locale and shell come from fixed lists.
+   - Timezones come from `/usr/share/zoneinfo`; keymaps from `/usr/share/kbd/keymaps`; UTF-8
+     locales from `/etc/locale.gen`.
+   - Timezone, keymap, locale and shell use fuzzy search. `Esc` returns to the previous picker.
 
 8. **Passwords**
    - LUKS passphrase only when LUKS is selected.
@@ -176,14 +178,18 @@ parted -s <disk> mklabel gpt
 For each planned partition:
 
 ```sh
-lsblk -rno PARTN <disk>
+parted -sm <disk> unit MiB print
 parted -s <disk> mkpart <archust-efi|archust-swap|archust-root> <fat32|linux-swap|filesystem> <start>MiB <end-plus-one>MiB
-parted -s <disk> set <partition-number> esp on    # EFI only
 partprobe <disk>
-lsblk -rno PARTN <disk>
+udevadm settle
+parted -sm <disk> unit MiB print
+parted -s <disk> set <partition-number> esp on    # EFI only
+partprobe <disk>                                  # EFI only
+udevadm settle                                    # EFI only
 ```
 
-The second partition-number count must match the expected number. Device paths are derived as:
+The second `parted` table must contain exactly one new partition number. `udevadm settle` waits
+for device nodes before later format commands. Device paths are derived as:
 
 ```text
 /dev/sda + 1       = /dev/sda1
@@ -221,24 +227,25 @@ Root format and mount:
 ```sh
 mkfs.ext4 -F -L archust <root>                      # ext4
 mkfs.xfs -f -L archust <root>                       # xfs
+mount -o noatime <root> /mnt                         # ext4 or xfs
 mkfs.btrfs -f -L archust <root>                     # btrfs
-mount -o noatime <root> /mnt                        # ext4 or xfs
-mount -o subvol=@,noatime,compress=zstd:1 <root> /mnt  # btrfs
+mount <root> /mnt                                    # btrfs: temporary top-level mount
+btrfs subvolume create /mnt/@                         # btrfs, then @home @log @pkg @snapshots @swp
+umount /mnt                                           # btrfs
+mount -o subvol=@,noatime,compress=zstd:1 <root> /mnt # btrfs
 mount <efi-device> /mnt/boot
 ```
 
-For btrfs, the code tries to create and mount these after the `subvol=@` mount:
+For btrfs, the temporary top-level mount creates all six subvolumes before mounting `@` as root:
 
 ```text
+@          /
 @home      /home
 @log       /var/log
 @pkg       /var/cache/pacman/pkg
 @snapshots /.snapshots
 @swp       /swap
 ```
-
-Current issue: `@` is never created before `mount -o subvol=@,...`; a new btrfs install fails at
-that mount. Use ext4 or xfs until fixed.
 
 ## 5. Pacstrap, multilib, fstab and resume
 

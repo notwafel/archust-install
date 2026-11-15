@@ -5,8 +5,18 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-15
+
 ### Fixed
 
+- **Disk selection constructed an invalid path.** `lsblk -p` returned `/dev/sda` and the prompt
+  prepended `/dev/` again; `blockdev` then failed with `ERR cannot read disk size`. Disk choices
+  now use bare names.
+- **Partition creation raced `lsblk`.** The installer counted partitions before udev exposed the
+  newly created device. It now compares `parted -m` tables and waits for `udevadm settle`.
+- **New btrfs installs failed before root mounted.** The `@` subvolume is now created from a
+  temporary top-level mount before it is mounted as `/`.
+- **zsh and fish installed `bash-completion`.** It is now selected only with bash.
 - **Boot after a dualboot install.** The EFI partition was mounted on `/boot` before the root
   filesystem was formatted and mounted; the root mount then hid it, `/boot` on the installed
   system stayed empty and GRUB wrote to the root filesystem. The root is formatted and mounted
@@ -57,6 +67,9 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Searchable timezone, keymap, locale and shell pickers. They read available choices from the
+  live ISO; `Esc` returns one system picker.
+- `FLOW.md`, a command-by-command execution map with review targets.
 - Tests for the GRUB command line (xfs, btrfs subvolumes, LUKS root) and the initramfs hook
   order (`encrypt` before `resume`).
 - `README.md`: theme-safe `<picture>` blocks (light assets only when the reader prefers light,

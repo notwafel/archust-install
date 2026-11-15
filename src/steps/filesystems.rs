@@ -47,9 +47,13 @@ pub fn mount(cfg: &Config, fs: &Formatted, root: &str) {
     cfg.fs.mkfs(root);
     match cfg.fs {
         Fs::Btrfs => {
+            sh("mount", &[root, MNT]);
+            for name in fs::SUBVOLS {
+                sh("btrfs", &["subvolume", "create", &format!("{}/{}", MNT, name)]);
+            }
+            sh("umount", &[MNT]);
             sh("mount", &["-o", &format!("subvol=@,{}", opts), root, MNT]);
             for (name, path) in fs::SUBVOLS.iter().zip(fs::SUBVOL_TARGETS.iter()).skip(1) {
-                sh("btrfs", &["subvolume", "create", &format!("{}/{}", MNT, name)]);
                 let target = format!("{}{}", MNT, path);
                 stdfs::create_dir_all(&target).ok();
                 sh("mount", &["-o", &format!("subvol={},{}", name, opts), root, &target]);

@@ -92,16 +92,13 @@ pub fn existing_esp(disk: &str) -> Option<String> {
 }
 
 fn partition_numbers(disk: &str) -> Vec<u32> {
-    out("lsblk", &["-rno", "PARTN", disk])
-        .unwrap_or_default()
-        .lines()
-        .filter(|l| !l.is_empty() && l.chars().all(|c| c.is_ascii_digit()))
-        .filter_map(|l| l.parse().ok())
-        .collect()
+    partition_numbers_from_table(&table(disk))
 }
 
-fn partition_count(disk: &str) -> u32 {
-    partition_numbers(disk).len() as u32
+fn partition_numbers_from_table(table: &str) -> Vec<u32> {
+    table.lines()
+        .filter_map(|line| line.split(':').next()?.parse().ok())
+        .collect()
 }
 
 /// Writes the plan to disk, returns the device path of each new partition.
@@ -115,7 +112,7 @@ pub fn create(disk: &str, parts: &[Part], dual: bool, root_fs_hint: &str) -> Vec
     }
     let mut created = Vec::with_capacity(parts.len());
     for p in parts {
-        let num = partition_count(disk) + 1;
+        let before = partition_numbers(disk);
         let (label, fs) = match p.role {
             Role::Esp => ("archust-efi", "fat32"),
             Role::Swap => ("archust-swap", "linux-swap"),
@@ -127,13 +124,20 @@ pub fn create(disk: &str, parts: &[Part], dual: bool, root_fs_hint: &str) -> Vec
             &format!("{}MiB", p.start),
             &format!("{}MiB", p.end + 1),
         ]);
+        run("partprobe", &[disk]);
+        run("udevadm", &["settle"]);
+        let added = partition_numbers(disk)
+            .into_iter()
+            .filter(|number| !before.contains(number))
+            .collect::<Vec<_>>();
+        if added.len() != 1 {
+            die(&format!("expected one new partition after mkpart, got {}", added.len()));
+        }
+        let num = added[0];
         if p.role == Role::Esp {
             run("parted", &["-s", disk, "set", &num.to_string(), "esp", "on"]);
-        }
-        run("partprobe", &[disk]);
-        let after = partition_count(disk);
-        if after != num {
-            die(&format!("expected {} partitions after mkpart, got {}", num, after));
+            run("partprobe", &[disk]);
+            run("udevadm", &["settle"]);
         }
         created.push(dev_name(disk, num));
     }
@@ -143,4 +147,15 @@ pub fn create(disk: &str, parts: &[Part], dual: bool, root_fs_hint: &str) -> Vec
 /// Swap device and hibernation flag, read from the partitions that were just created.
 pub fn swap_device(parts: &[Part], devices: &[String], hibernate: bool) -> Option<(String, bool)> {
     parts.iter().position(|p| p.role == Role::Swap).map(|i| (devices[i].clone(), hibernate))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::partition_numbers_from_table;
+
+    #[test]
+    fn reads_partition_numbers_from_parted_machine_output() {
+        let table = "BYT;\n/dev/sda:1024MiB:scsi:512:512:gpt:;\n1:1MiB:513MiB:512MiB:fat32:archust-efi:esp;\n3:514MiB:1023MiB:510MiB:ext4:archust-root:;\n";
+        assert_eq!(partition_numbers_from_table(table), [1, 3]);
+    }
 }

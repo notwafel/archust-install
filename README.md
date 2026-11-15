@@ -53,9 +53,10 @@ Every run shows the same eight numbered sections, so you always know where you a
 Type /dev/nvme0n1 to confirm:
 ```
 
-Arrow keys / `j` `k` move, Enter accepts, space toggles multi-select lists, and `Esc` / `Ctrl-C`
-aborts. Invalid hostnames, usernames, passwords and impossible partition sizes are re-asked. A
-wrong wipe confirmation aborts the run.
+Arrow keys / `j` `k` move, Enter accepts, space toggles multi-select lists, and `Ctrl-C`
+aborts. In the searchable system pickers, `Esc` returns to the previous field. Invalid hostnames,
+usernames, passwords and impossible partition sizes are re-asked. A wrong wipe confirmation
+aborts the run.
 
 ![Controls: arrow keys or j and k to move, Enter to accept, Space to toggle in multi-select lists, Esc or Ctrl-C to abort](assets/controls-dark.svg#gh-dark-mode-only)
 ![Controls: arrow keys or j and k to move, Enter to accept, Space to toggle in multi-select lists, Esc or Ctrl-C to abort](assets/controls-light.svg#gh-light-mode-only)
@@ -79,7 +80,7 @@ re-asked; a wrong typed wipe confirmation aborts.
 | 4 | Filesystem and encryption | btrfs / ext4 / xfs, optional LUKS, then show the plan | btrfs, LUKS off |
 | 5 | Hardware | kernel and GPU driver | `linux`, detected GPU |
 | 6 | Packages | multilib, Wayland + XWayland, nine optional groups | all selected |
-| 7 | System | hostname, username, timezone, keymap, locale, login shell | —, —, UTC, us, en_US, bash |
+| 7 | System | hostname, username, searchable timezone, keymap, locale and login shell | —, —, UTC, us, en_US, bash |
 | 8 | Passwords | LUKS passphrase when selected, user and root passwords | minimum 8 characters, typed twice |
 
 The dualboot branch requires an existing ESP and at least 16 GiB after the last partition. An
@@ -113,11 +114,9 @@ installer runs `findmnt -S <disk>` and aborts when it finds a mounted source.
 
 - GPT, UEFI only. Full wipe or dualboot. Dualboot reuses an existing EFI partition as `/boot` and
   creates new partitions after the last existing one.
-- **ext4** or **xfs**: one root filesystem mounted with `noatime`. `e2fsprogs` or `xfsprogs` is
-  added to `pacstrap` for the selected filesystem.
-- **btrfs currently does not complete on a new filesystem.** The mount step requests `subvol=@`
-  before the code creates `@`; it only creates `@home`, `@log`, `@pkg`, `@snapshots` and `@swp`
-  afterwards. Use ext4 or xfs until that path is fixed.
+- **btrfs**: `@`, `@home`, `@log`, `@pkg`, `@snapshots` and `@swp`; mounted with
+  `noatime,compress=zstd:1`. **ext4** or **xfs**: one root filesystem mounted with `noatime`.
+  `e2fsprogs` or `xfsprogs` is added to `pacstrap` for the selected filesystem.
 - Optional **LUKS2** on the root partition: AES-XTS-plain64, 512-bit key, SHA-512 and Argon2id.
   The passphrase reaches `cryptsetup` on stdin, never on the command line.
 - **GRUB** EFI: `--target=x86_64-efi`, `GRUB_TERMINAL=console`, `GRUB_TIMEOUT=3`,
@@ -138,7 +137,7 @@ installer runs `findmnt -S <disk>` and aborts when it finds a mounted source.
 ```text
 Always:
   base base-devel linux-headers linux-firmware dkms locales
-  grub efibootmgr dosfstools mtools networkmanager sudo bash-completion
+  grub efibootmgr dosfstools mtools networkmanager sudo
   selected kernel; intel-ucode or amd-ucode when detected
 
 Selected GPU:
@@ -156,15 +155,18 @@ Selected options:
   xfs: xfsprogs
   LUKS: cryptsetup
   dualboot: os-prober
+  bash: bash-completion
   zsh / fish: zsh / fish
 
 Preselected optional groups:
-  nano curl git flatpak pipewire man-db reflector graphics firmware
+  Nano editor · curl · git · Flatpak · PipeWire audio · Manual pages · Reflector mirrors
+  Graphics: Mesa, Vulkan, VA tools · Firmware: Intel, Realtek, NVIDIA
 ```
 
-The optional groups start selected but can be unticked. They expand to the packages in step 6:
-`pipewire` adds PipeWire and ALSA tools; `graphics` adds Mesa/Vulkan/VA tools; `firmware` adds
-`linux-firmware-intel`, `linux-firmware-realtek` and `linux-firmware-nvidia`.
+The optional groups start selected but can be unticked. `PipeWire audio` adds PipeWire and ALSA
+tools. `Graphics` adds `mesa`, `vulkan-icd-loader` and `libva-utils`; it supplies userspace
+OpenGL, Vulkan and video-acceleration tooling. `Firmware` adds `linux-firmware-intel`,
+`linux-firmware-realtek` and `linux-firmware-nvidia` for hardware support.
 
 `linux-headers` is always installed, including with `linux-lts` and `linux-zen`. It does not add
 matching `linux-lts-headers` or `linux-zen-headers`; do that manually before using DKMS on either
@@ -275,14 +277,12 @@ Runs the partition arithmetic on fixed cases (wipe, dualboot, swap, fixed root) 
 
 - **UEFI only**, x86_64.
 - Not tested on real hardware. The TUI and install path have not run on a live ISO yet.
-- **btrfs is currently broken:** it mounts `subvol=@` before creating `@`. Choose ext4 or xfs.
-- The installer always adds `linux-headers`; it does not add matching headers for `linux-lts` or
-  `linux-zen`. Add those manually before using DKMS.
+- Timezones and keymaps are read from the live ISO. UTF-8 locales come from `/etc/locale.gen`.
+  All three use fuzzy search; `Esc` moves back one system picker.
 - GPU detection chooses a default only. It does not validate NVIDIA hardware compatibility with
   the selected driver package.
 - Dualboot needs an existing EFI partition and at least 16 GiB after the last partition. No
   shrinking or resizing of existing partitions.
-- Timezone, keymap and locale use fixed short lists. The keymap list has `uk`, not `gb`.
 - No snapshot tool, zram or encrypted swap.
 - Small installer, not general-purpose. Run `--check` and `cargo test` after each edit.
 

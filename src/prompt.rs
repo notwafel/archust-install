@@ -5,7 +5,8 @@ use crate::detect;
 use crate::disk;
 use crate::fs::{self, Fs};
 use crate::layout::{self, plan, Request};
-use crate::term::{ask, ask_name, ask_num, ask_yes, pick, pick_disk, pick_many};
+use crate::term::{ask, ask_name, ask_num, ask_yes, pick, pick_disk, pick_fuzzy, pick_many};
+use std::path::Path;
 use crate::ui::{die, item, note, say, step, warn};
 
 const STEPS: usize = 8;
@@ -21,23 +22,23 @@ const ZONES: [&str; 15] = [
     "Asia/Tokyo", "Australia/Sydney",
 ];
 
-const BASE: [&str; 13] = [
+const BASE: [&str; 12] = [
     "base", "base-devel", "linux-headers", "linux-firmware", "dkms", "locales",
-    "grub", "efibootmgr", "dosfstools", "mtools", "networkmanager", "sudo", "bash-completion",
+    "grub", "efibootmgr", "dosfstools", "mtools", "networkmanager", "sudo",
 ];
 
 /// Optional groups, pre-ticked. Unchecked ones are not installed.
 const EXTRAS: [(&str, &str); 9] = [
-    ("nano", "nano"),
+    ("Nano editor", "nano"),
     ("curl", "curl"),
     ("git", "git"),
-    ("flatpak", "flatpak"),
-    ("pipewire", "pipewire pipewire-pulse pipewire-alsa wireplumber alsa-utils"),
-    ("man-db", "man-db"),
-    ("reflector", "reflector"),
-    ("graphics", "mesa vulkan-icd-loader libva-utils"),
+    ("Flatpak", "flatpak"),
+    ("PipeWire audio", "pipewire pipewire-pulse pipewire-alsa wireplumber alsa-utils"),
+    ("Manual pages", "man-db"),
+    ("Reflector mirrors", "reflector"),
+    ("Graphics: Mesa, Vulkan, VA tools", "mesa vulkan-icd-loader libva-utils"),
     // extra firmware: laptops and new Wi-Fi cards need these, plain linux-firmware is not enough
-    ("firmware", "linux-firmware-intel linux-firmware-realtek linux-firmware-nvidia"),
+    ("Firmware: Intel, Realtek, NVIDIA", "linux-firmware-intel linux-firmware-realtek linux-firmware-nvidia"),
 ];
 
 const MULTILIB: [&str; 5] = ["lib32-mesa", "lib32-vulkan-icd-loader", "lib32-libva", "lib32-alsa-plugins", "lib32-gnutls"];
@@ -93,10 +94,7 @@ pub fn ask_everything() -> Config {
     step(7, STEPS, "System");
     let hostname = ask_name("Hostname");
     let user = ask_name("Username");
-    let tz = pick_zone();
-    let keymap = pick("Keyboard layout", &KEYMAPS, 0).to_string();
-    let locale = pick("Locale", &LOCALES, 0).to_string();
-    let shell = pick("Login shell", &SHELLS, 0).to_string();
+    let (tz, keymap, locale, shell) = ask_system_options();
 
     step(8, STEPS, "Passwords");
     let luks_pass = if luks { crate::term::ask_pass("LUKS passphrase") } else { String::new() };
@@ -120,6 +118,9 @@ pub fn ask_everything() -> Config {
         if gpu.nvidia() {
             packages.push("lib32-nvidia-utils");
         }
+    }
+    if shell == "/bin/bash" {
+        packages.push("bash-completion");
     }
     if let Some(pkg) = shell_package(&shell) {
         packages.push(pkg);
@@ -242,14 +243,103 @@ fn shell_package(shell: &str) -> Option<&'static str> {
     }
 }
 
-fn pick_zone() -> String {
-    let answer = pick("Timezone", &ZONES, 0).to_string();
-    let path = format!("/usr/share/zoneinfo/{}", answer);
-    if std::path::Path::new(&path).exists() {
-        answer
+fn ask_system_options() -> (String, String, String, String) {
+    let zones = zone_choices();
+    let keymaps = keymap_choices();
+    let locales = locale_choices();
+    let shells = SHELLS.iter().map(ToString::to_string).collect::<Vec<_>>();
+    let mut tz = "UTC".to_string();
+    let mut keymap = "us".to_string();
+    let mut locale = "en_US".to_string();
+    let shell = "/bin/bash".to_string();
+    let mut field = 0;
+
+    loop {
+        match field {
+            0 => if let Some(value) = pick_fuzzy("Timezone (type to search, Esc = back)", &zones, index_of(&zones, &tz)) {
+                tz = value;
+                field = 1;
+            },
+            1 => match pick_fuzzy("Keyboard layout (type to search, Esc = back)", &keymaps, index_of(&keymaps, &keymap)) {
+                Some(value) => { keymap = value; field = 2; }
+                None => field = 0,
+            },
+            2 => match pick_fuzzy("Locale (type to search, Esc = back)", &locales, index_of(&locales, &locale)) {
+                Some(value) => { locale = value; field = 3; }
+                None => field = 1,
+            },
+            _ => match pick_fuzzy("Login shell (type to search, Esc = back)", &shells, index_of(&shells, &shell)) {
+                Some(value) => return (tz, keymap, locale, value),
+                None => field = 2,
+            },
+        }
+    }
+}
+
+fn index_of(items: &[String], value: &str) -> usize {
+    items.iter().position(|item| item == value).unwrap_or(0)
+}
+
+fn zone_choices() -> Vec<String> {
+    let mut zones = files_below(Path::new("/usr/share/zoneinfo"));
+    zones.retain(|zone| {
+        !zone.starts_with("posix/")
+            && !zone.starts_with("right/")
+            && !["iso3166.tab", "leapseconds", "localtime", "posixrules", "tzdata.zi", "zone.tab", "zone1970.tab"].contains(&zone.as_str())
+    });
+    choices_or(zones, &ZONES)
+}
+
+fn keymap_choices() -> Vec<String> {
+    let mut keymaps = files_below(Path::new("/usr/share/kbd/keymaps"));
+    keymaps = keymaps.into_iter().filter_map(|map| {
+        map.strip_suffix(".map.gz").or_else(|| map.strip_suffix(".map")).map(str::to_string)
+    }).collect();
+    choices_or(keymaps, &KEYMAPS)
+}
+
+fn locale_choices() -> Vec<String> {
+    let locales = std::fs::read_to_string("/etc/locale.gen")
+        .map(|body| parse_utf8_locales(&body))
+        .unwrap_or_default();
+    choices_or(locales, &LOCALES)
+}
+
+fn parse_utf8_locales(body: &str) -> Vec<String> {
+    body.lines().filter_map(|line| {
+        let mut fields = line.trim_start().trim_start_matches('#').split_whitespace();
+        let locale = fields.next()?;
+        (fields.next() == Some("UTF-8"))
+            .then(|| locale.strip_suffix(".UTF-8").map(str::to_string))
+            .flatten()
+    }).collect()
+}
+
+fn files_below(root: &Path) -> Vec<String> {
+    fn visit(root: &Path, dir: &Path, files: &mut Vec<String>) {
+        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                visit(root, &path, files);
+            } else if path.is_file() && let Ok(relative) = path.strip_prefix(root) {
+                files.push(relative.to_string_lossy().into_owned());
+            }
+        }
+    }
+
+    let mut files = Vec::new();
+    visit(root, root, &mut files);
+    files
+}
+
+fn choices_or(mut choices: Vec<String>, fallback: &[&str]) -> Vec<String> {
+    choices.sort_unstable();
+    choices.dedup();
+    if choices.is_empty() {
+        fallback.iter().map(ToString::to_string).collect()
     } else {
-        warn(&format!("{} missing on this ISO, using UTC", answer));
-        "UTC".to_string()
+        choices
     }
 }
 
@@ -286,4 +376,15 @@ fn show_plan(disk: &str, total_mib: u64, layout: &Layout, fs: Fs, luks: bool) {
         item("subvolumes", "none, single root filesystem");
     }
     crate::ui::rule();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_utf8_locales;
+
+    #[test]
+    fn lists_only_utf8_locale_names() {
+        let locales = parse_utf8_locales("#en_US.UTF-8 UTF-8\npl_PL.UTF-8 UTF-8\n#de_DE ISO-8859-1\n");
+        assert_eq!(locales, ["en_US", "pl_PL"]);
+    }
 }
