@@ -19,6 +19,17 @@ const LABELS: [&str; 6] = [
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Gpu { Intel, Amd, Nvidia, NvidiaOpen, Nouveau, Virt }
 
+/// Display-controller lines only: `lspci` also lists Intel audio, USB and SATA chipsets.
+fn display_lines() -> String {
+    out("lspci", &["-nn"])
+        .unwrap_or_default()
+        .to_lowercase()
+        .lines()
+        .filter(|l| l.contains("vga") || l.contains("3d") || l.contains("display"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 impl Gpu {
     pub fn key(self) -> &'static str {
         match self {
@@ -32,15 +43,10 @@ impl Gpu {
     }
 
     pub fn detect() -> Gpu {
-        let lspci = out("lspci", &["-nn"]).unwrap_or_default().to_lowercase();
-        let gpus: String = lspci
-            .lines()
-            .filter(|l| l.contains("vga") || l.contains("3d") || l.contains("display"))
-            .collect::<Vec<_>>()
-            .join("\n");
+        let gpus = display_lines();
         if gpus.contains("nvidia") {
             Gpu::Nvidia
-        } else if gpus.contains("amd") || gpus.contains("ati") {
+        } else if gpus.contains("amd") || gpus.contains("radeon") {
             Gpu::Amd
         } else if gpus.contains("intel") {
             Gpu::Intel
@@ -68,6 +74,22 @@ impl std::fmt::Display for Gpu {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result { f.write_str(self.key()) }
 }
 
+/// Second GPU on a hybrid laptop: the integrated one needs its own Vulkan and VA drivers too,
+/// otherwise only the discrete card gets them.
+pub fn companion() -> Option<Gpu> {
+    companion_from(&display_lines())
+}
+
+fn companion_from(gpus: &str) -> Option<Gpu> {
+    if gpus.contains("intel") {
+        Some(Gpu::Intel)
+    } else if gpus.contains("amd") || gpus.contains("radeon") {
+        Some(Gpu::Amd)
+    } else {
+        None
+    }
+}
+
 pub fn ask_gpu() -> Gpu {
     let detected = Gpu::detect();
     let default = CHOICES.iter().position(|g| *g == detected).unwrap_or(5);
@@ -93,5 +115,19 @@ pub fn cpu_ucode() -> Option<&'static str> {
         Some(l) if l.contains("Intel") => Some("intel-ucode"),
         Some(l) if l.contains("AMD") => Some("amd-ucode"),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{companion_from, Gpu};
+
+    #[test]
+    fn finds_the_integrated_gpu_next_to_nvidia() {
+        let intel_and_nvidia = "vga compatible controller: nvidia corporation ga104\nvga compatible controller: intel corporation tigerlake";
+        assert_eq!(companion_from(intel_and_nvidia), Some(Gpu::Intel));
+        let amd_and_nvidia = "vga compatible controller: advanced micro devices [amd/ati] radeon\n3d controller: nvidia corporation ga107";
+        assert_eq!(companion_from(amd_and_nvidia), Some(Gpu::Amd));
+        assert_eq!(companion_from("vga compatible controller: nvidia corporation ga104"), None);
     }
 }

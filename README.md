@@ -150,6 +150,9 @@ Selected GPU:
   NVIDIA: nvidia-dkms or nvidia-open-dkms, nvidia-utils, libva-nvidia-driver
   nouveau / VM: no additional GPU packages
 
+  Hybrid with NVIDIA (Intel or AMD integrated GPU also present):
+  the NVIDIA set plus vulkan-intel intel-media-driver or vulkan-radeon libva-mesa-driver
+
 Selected options:
   multilib: lib32-mesa lib32-vulkan-icd-loader lib32-libva lib32-alsa-plugins lib32-gnutls
             plus lib32-nvidia-utils for NVIDIA proprietary or open
@@ -179,6 +182,10 @@ gets no firmware group at all.
 `linux-headers` is always installed, including with `linux-lts` and `linux-zen`. It does not add
 matching `linux-lts-headers` or `linux-zen-headers`; do that manually before using DKMS on either
 kernel.
+
+CPU microcode follows the CPU vendor and is independent of the GPU: an AMD CPU with an NVIDIA card
+gets `amd-ucode` plus the NVIDIA packages, an Intel CPU with an AMD card gets `intel-ucode` plus
+`vulkan-radeon` and `libva-mesa-driver`.
 
 The installer validates the three optional firmware names against current repositories before it
 touches the disk. A renamed package stops the run before `pacstrap`.

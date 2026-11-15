@@ -5,6 +5,16 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-11-15
+
+### Fixed
+
+- **Intel-only machines were detected as AMD.** `lspci` matches for `ati` hit the word
+  "corporation", so an Intel display controller could be classified as AMD. The check now looks
+  for `radeon`.
+- **Hybrid laptops got drivers for the NVIDIA card only.** When a second display controller is
+  Intel or AMD, its `vulkan-*` and `libva-*` packages are installed next to the NVIDIA set.
+
 ## [0.2.3] - 2026-11-15
 
 ### Fixed

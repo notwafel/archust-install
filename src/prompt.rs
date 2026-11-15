@@ -123,6 +123,12 @@ pub fn ask_everything() -> Config {
     packages.extend(extras);
     packages.push(kernel);
     packages.extend(gpu.packages());
+    // hybrid laptop: without this the integrated GPU gets no Vulkan/VA driver at all
+    if matches!(gpu, detect::Gpu::Nvidia | detect::Gpu::NvidiaOpen | detect::Gpu::Nouveau)
+        && let Some(igpu) = detect::companion()
+    {
+        packages.extend(igpu.packages());
+    }
     if let Some(ucode) = detect::cpu_ucode() {
         packages.push(ucode);
     }
