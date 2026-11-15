@@ -31,7 +31,8 @@ pub struct Request {
 /// Unpartitioned room after the last existing partition. Dualboot plans live here, not in
 /// `total_mib`: an existing system may fill the disk almost completely and still have room.
 pub fn free_mib(r: &Request) -> u64 {
-    r.total_mib.saturating_sub(r.free_start) + 1
+    // the last usable MiB is total - 2, the backup GPT needs the one after it
+    r.total_mib.saturating_sub(r.free_start).saturating_sub(1)
 }
 
 /// `None` when the request does not fit. An existing ESP (dualboot) is not in the result.

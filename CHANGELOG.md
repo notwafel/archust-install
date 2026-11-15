@@ -5,6 +5,20 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.8] - 2026-11-15
+
+### Fixed
+
+- **Installing beside an existing system put the new partitions at 2 MiB.** `free_start` parsed
+  `parted -sm` partition rows as if they started with `/dev/`, found none, and always returned 2.
+  The dualboot branch therefore planned the root partition over the existing table. It now reads
+  the numeric partition rows and starts after the real last partition.
+- **A formatted but inactive swap partition aborted the wipe.** `lsblk` reports `FSTYPE=swap` for
+  an unused swap partition too, so the installer ran `swapoff` on a device that was not active.
+  Only `[SWAP]` mountpoints are switched off now.
+- **The disk picker listed `loop` devices.** The live ISO's squashfs loops and `rom` devices were
+  offered as install targets. Only `disk` rows are shown.
+
 ## [0.2.7] - 2026-11-15
 
 ### Fixed

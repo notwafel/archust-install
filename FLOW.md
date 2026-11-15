@@ -98,7 +98,7 @@ this section except the cowspace remount are fatal on failure.
    - List choices and inspect selected disk:
 
      ```sh
-     lsblk -dno NAME
+     lsblk -dno TYPE,NAME        # only `disk` rows: loop/rom devices cannot be installed to
      lsblk -dpno NAME,SIZE,MODEL
      lsblk -o NAME,SIZE,FSTYPE,LABEL,MOUNTPOINT <disk>
      blockdev --getsize64 <disk>
@@ -182,8 +182,8 @@ Full wipe first reads the partitions of the disk:
 lsblk -lpno NAME,FSTYPE,MOUNTPOINTS <disk>
 ```
 
-A partition with `FSTYPE=swap` is switched off with `swapoff <device>` (`-p` makes the names
-absolute); a mounted partition aborts
+A partition with `FSTYPE=swap` and the `[SWAP]` mountpoint is active and switched off with
+`swapoff <device>` (`-p` makes the names absolute); a mounted partition aborts
 with its device and mountpoint. Then it runs:
 
 ```sh
