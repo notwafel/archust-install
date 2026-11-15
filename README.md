@@ -32,8 +32,8 @@ On the Arch live ISO, as root, with the network up:
 
 ```sh
 mount -o remount,size=4G /run/archiso/cowspace      # live ISO ships a tiny copy-on-write layer
-sudo reflector --country Poland,Germany,Czechia --protocol https --latest 10 --sort rate --save /etc/pacman.d/mirrorlist      # u can use without --country flag
-pacman -Sy --needed --noconfirm rust git
+sudo reflector --country Poland,Germany,Czechia --protocol https --latest 20 --sort rate --save /etc/pacman.d/mirrorlist      # u can use without --country flag
+pacman -Syu --noconfirm rust git
 git clone https://github.com/notwafel/archust-install && cd archust-install
 ./archust_install.sh
 ```
@@ -42,8 +42,8 @@ git clone https://github.com/notwafel/archust-install && cd archust-install
 when `src/` or `Cargo.toml` changed, then execs it. `--locked` keeps the committed dependency
 versions; first builds can still need crates.io to download uncached dependencies.
 
-The installer repeats the mirror step itself before any prompt, using its own trusted-country list
-and `--latest 10`, so the manual `reflector` run only has to carry `pacman -Sy rust git`.
+The installer refreshes the mirrorlist again before any prompt, with its own trusted-country list and
+`--latest 10`. The manual steps above only get `rust`, `git` and the build going.
 
 ## Header
 
