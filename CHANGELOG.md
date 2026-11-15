@@ -5,6 +5,42 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-15
+
+### Added
+
+- **Bluetooth, firewall, printing and power management are optional picks.** Bluetooth installs
+  `bluez`/`bluez-utils` and enables `bluetooth.service`; UFW is configured with
+  `DEFAULT_INPUT_POLICY="DROP"`, outgoing traffic allowed and IPv6 enabled; CUPS installs `cups`
+  and enables `cups.service`; power management offers `power-profiles-daemon` with a chosen
+  initial profile, `tlp`, or none.
+- **A non-FAT32 ESP can be formatted in place.** A stale ext4 or unformatted ESP no longer forces
+  a full-disk wipe; a separate default-no confirmation schedules `mkfs.fat -F32` after the final
+  install confirmation, or sends the user to the wipe branch.
+
+### Fixed
+
+- **A retry after a failed LUKS install still failed with `Partition(s) on /dev/sda are being
+  used`.** The wipe guard ignored `TYPE=crypt`, so an open `/dev/mapper/root` looked unused. It now
+  aborts and prints the `cryptsetup close` command instead of closing the mapper.
+- **The final package list was checked after the disk was wiped.** Only three firmware names were
+  verified early. The complete `Config.packages` list now resolves with `pacman -Sp --needed`
+  after the prompts and before `Start the installation?`, with `[multilib]` enabled when selected.
+- **`ask_name` accepted a leading `-`.** `-rf` reached `useradd` as an option after formatting.
+- **A mountpoint with spaces was split into fields.** The disk listing uses `lsblk -P`, so
+  `/run/media/user/My Disk` stays one mountpoint in the abort message.
+- **The disk menu counted a LUKS mapper as a partition.** Only `TYPE=part` rows are counted.
+- **`pacman -Sy` with named packages could partially upgrade the live ISO.** The installer no
+  longer installs helpers by name; the official ISO already ships them, and missing binaries stop
+  the run before any package is pulled into the live tmpfs.
+- **`Esc` at the timezone picker did nothing.** The first fuzzy field now aborts instead of
+  returning to itself.
+- **Dead configuration removed.** The `RESUME=` file is not written (the current `resume` hook
+  reads `resume=` from the kernel command line), and the unused `@swp`/`/swap` subvolume is gone.
+- **The keep/wipe branch is tested.** `keep_choice` is a pure decision over the `parted` table,
+  total size, ESP presence and ESP filesystem; tests cover enough room, too little room, no ESP
+  and a non-vfat ESP.
+
 ## [0.2.8] - 2026-11-15
 
 ### Fixed

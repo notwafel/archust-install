@@ -95,7 +95,7 @@ fn reflector_args() -> Vec<String> {
     REFLECT_FLAGS.iter().flat_map(|(f, v)| [f.to_string(), v.to_string()]).collect()
 }
 
-/// HTTPS mirrors from trusted countries, then the helper packages and refreshed keyring.
+/// HTTPS mirrors from trusted countries, then the refreshed keyring.
 pub fn prepare_mirrors() {
     crate::ui::say("Mirrors: 10 latest HTTPS mirrors from trusted countries, sorted by rate");
     // live writes go to a tmpfs sized at boot; a full install needs far more than the default
@@ -105,13 +105,17 @@ pub fn prepare_mirrors() {
         fs::create_dir_all(dir).ok();
     }
     fs::write(LIVE_CONF, reflector_conf()).unwrap_or_else(|e| die(&format!("cannot write {}: {}", LIVE_CONF, e)));
-    // keyring before any package, or reflector and the helpers fail on an old ISO signature
+    // the official ISO already ships every helper; installing one by name from a newer repo
+    // would mix it with the running live system and can pull a newer glibc/pacman into tmpfs
+    for tool in ["reflector", "mkfs.fat", "btrfs", "cryptsetup"] {
+        if !exists(&format!("/usr/bin/{}", tool)) {
+            die(&format!("/usr/bin/{} is missing from this ISO - use a current Arch ISO", tool));
+        }
+    }
     run("pacman-key", &["--init"]);
-    run("pacman", &["-Sy", "--needed", "--noconfirm", "archlinux-keyring"]);
     run("pacman-key", &["--populate", "archlinux"]);
-    // no `pacman -Syu`: upgrading the running archiso replaces pacman and glibc inside its own
-    // tmpfs and leaves a half-upgraded live system; `-Sy` is enough to install helpers by name
-    run("pacman", &["-Sy", "--needed", "--noconfirm", "reflector"]);
+    // database refresh only; no `-S` with a named package (partial upgrade of the live system)
+    run("pacman", &["-Sy", "--noconfirm"]);
     let args = reflector_args();
     let refs: Vec<&str> = args.iter().map(String::as_str).collect();
     run("reflector", &refs);
@@ -123,17 +127,18 @@ pub fn prepare_mirrors() {
     if n == 0 {
         die("reflector wrote no HTTPS mirrors");
     }
-    run("pacman", &["-Sy", "--needed", "--noconfirm",
-        "btrfs-progs", "gptfdisk", "dosfstools", "cryptsetup"]);
-    run("pacman", &["-Sy", "--needed", "--noconfirm", "archlinux-keyring"]);
-    run("pacman-key", &["--populate", "archlinux"]);
-    // -Sp fails on a name the repos do not know, so a renamed package stops here and not
-    // inside pacstrap after the disk is already formatted
-    const FIRMWARE: [&str; 3] = ["linux-firmware-intel", "linux-firmware-realtek", "linux-firmware-nvidia"];
-    let mut package_args = vec!["-Sp", "--needed", "--noconfirm"];
-    package_args.extend(FIRMWARE);
-    if out("pacman", &package_args).is_none() {
-        die(&format!("not in the repos: {}", FIRMWARE.join(" ")));
+}
+
+/// Resolves every target package before the disk is touched. `-Sp` only prints URLs and
+/// installs nothing; a renamed or missing package aborts here, not inside pacstrap.
+pub fn check_packages(packages: &[&str], multilib: bool) {
+    if multilib {
+        crate::steps::pacstrap::enable_multilib();
+    }
+    let mut args = vec!["-Sp", "--needed", "--noconfirm"];
+    args.extend_from_slice(packages);
+    if out("pacman", &args).is_none() {
+        die(&format!("not in the repos: {}", packages.join(" ")));
     }
 }
 

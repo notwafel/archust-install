@@ -39,6 +39,6 @@ impl std::fmt::Display for Fs {
 pub const CHOICES: [Fs; 3] = [Fs::Btrfs, Fs::Ext4, Fs::Xfs];
 
 /// Subvolumes only make sense on btrfs.
-pub const SUBVOLS: [&str; 6] = ["@", "@home", "@log", "@pkg", "@snapshots", "@swp"];
-pub const SUBVOL_TARGETS: [&str; 6] =
-    ["/", "/home", "/var/log", "/var/cache/pacman/pkg", "/.snapshots", "/swap"];
+pub const SUBVOLS: [&str; 5] = ["@", "@home", "@log", "@pkg", "@snapshots"];
+pub const SUBVOL_TARGETS: [&str; 5] =
+    ["/", "/home", "/var/log", "/var/cache/pacman/pkg", "/.snapshots"];

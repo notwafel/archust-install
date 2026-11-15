@@ -45,43 +45,96 @@ fn disk_names(rows: &str) -> Vec<String> {
         .collect()
 }
 
-/// Raw `lsblk` rows: NAME, FSTYPE and mountpoints for the disk and its partitions.
+/// Raw `lsblk` rows: NAME, TYPE, FSTYPE and mountpoints for the disk and its children.
 fn listing(disk: &str) -> String {
-    // -p: device paths, or `swapoff sda2` fails with "No such file or directory"
-    out("lsblk", &["-lpno", "NAME,FSTYPE,MOUNTPOINTS", disk]).unwrap_or_default()
+    // -p: device paths, or `swapoff sda2` fails with "No such file or directory";
+    // -P: KEY="value" pairs, so a mountpoint with spaces stays one field
+    out("lsblk", &["-lpno", "NAME,TYPE,FSTYPE,MOUNTPOINTS", "-P", disk]).unwrap_or_default()
 }
 
-/// Splits an `lsblk` listing into active swap devices and mounted partitions. The first row is
-/// the disk itself: no filesystem, no mountpoint, so it falls through both lists.
-fn usage_from(listing: &str) -> (Vec<String>, Vec<String>) {
-    let mut swap = Vec::new();
-    let mut mounted = Vec::new();
-    for line in listing.lines() {
-        let mut fields = line.split_whitespace();
-        let (Some(name), Some(fstype)) = (fields.next(), fields.next()) else { continue };
-        let points = fields.collect::<Vec<_>>();
-        if fstype == "swap" {
+/// One `lsblk -P` row.
+struct Row {
+    name: String,
+    kind: String,
+    fstype: String,
+    mounts: String,
+}
+
+fn rows(listing: &str) -> Vec<Row> {
+    listing
+        .lines()
+        .map(|line| Row {
+            name: value(line, "NAME").unwrap_or_default().to_string(),
+            kind: value(line, "TYPE").unwrap_or_default().to_string(),
+            fstype: value(line, "FSTYPE").unwrap_or_default().to_string(),
+            mounts: value(line, "MOUNTPOINTS").unwrap_or_default().replace('\n', ", "),
+        })
+        .collect()
+}
+
+/// Reads one `KEY="value"` pair from an `lsblk -P` row.
+fn value<'a>(line: &'a str, key: &str) -> Option<&'a str> {
+    let mut rest = line;
+    loop {
+        let (head, after) = rest.split_once('"')?;
+        let (val, tail) = after.split_once('"')?;
+        if head.trim().trim_end_matches('=') == key {
+            return Some(val);
+        }
+        rest = tail;
+    }
+}
+
+#[derive(Default)]
+struct Usage {
+    swap: Vec<String>,
+    mounted: Vec<String>,
+    crypt: Vec<String>,
+}
+
+/// Active swap, mounted children and open LUKS mappers below the disk.
+fn usage_from(listing: &str) -> Usage {
+    let mut usage = Usage::default();
+    for row in rows(listing) {
+        if row.kind == "crypt" {
+            usage.crypt.push(row.name.clone());
+        }
+        if row.fstype == "swap" {
             // `[SWAP]` is the mountpoint of an active swap; a formatted but unused swap
             // partition has no mountpoint and `swapoff` would fail on it
-            if points.contains(&"[SWAP]") {
-                swap.push(name.to_string());
+            if row.mounts.contains("[SWAP]") {
+                usage.swap.push(row.name);
             }
-        } else if !points.is_empty() {
-            mounted.push(format!("{} on {}", name, points.join(",")));
+        } else if !row.mounts.is_empty() {
+            usage.mounted.push(format!("{} on {}", row.name, row.mounts));
         }
     }
-    (swap, mounted)
+    usage
 }
 
-/// Parted refuses to relabel a disk whose partitions are mounted or active as swap. Swap is
-/// switched off (the live ISO may have picked it up); a mounted partition aborts the run.
+/// Counts `part` rows only; a LUKS mapper is a `crypt` child of a partition.
+fn partition_count(listing: &str) -> usize {
+    rows(listing).iter().filter(|row| row.kind == "part").count()
+}
+
+/// Parted refuses to relabel a disk whose partitions are mounted, active as swap or held by an
+/// open LUKS mapper. Swap is switched off; the rest aborts with the manual recovery command.
 fn clear_busy(disk: &str) {
-    let (swap, mounted) = usage_from(&listing(disk));
-    for dev in swap {
-        run("swapoff", &[&dev]);
+    let usage = usage_from(&listing(disk));
+    for dev in &usage.swap {
+        run("swapoff", &[dev.as_str()]);
     }
-    if !mounted.is_empty() {
-        die(&format!("unmount first: {}", mounted.join(", ")));
+    if !usage.crypt.is_empty() {
+        let close = usage
+            .crypt
+            .iter()
+            .map(|mapper| format!("cryptsetup close {}", mapper.trim_start_matches("/dev/mapper/")))
+            .collect::<Vec<_>>()
+            .join(", ");
+        die(&format!("close the open LUKS mapper first: {}", close));
+    }
+    if !usage.mounted.is_empty() {
+        die(&format!("unmount first: {}", usage.mounted.join(", ")));
     }
 }
 
@@ -91,10 +144,33 @@ pub fn table(disk: &str) -> String {
 }
 
 /// Unpartitioned space after the last partition, in MiB, for a known disk size.
-pub fn free_mib(disk: &str, total_mib: u64) -> u64 {
-    let used = free_start(disk);
+pub fn free_mib_from_table(table: &str, total_mib: u64) -> u64 {
     // the last usable MiB is total - 2, the backup GPT needs the one after it
-    total_mib.saturating_sub(used).saturating_sub(1)
+    total_mib.saturating_sub(last_end_from_table(table)).saturating_sub(1)
+}
+
+/// What step 2 does with a disk that already has partitions.
+#[derive(Debug, PartialEq)]
+pub enum EspChoice {
+    /// Enough free space and a FAT32 ESP: reuse both.
+    Reuse(u64),
+    /// Enough free space, but the ESP needs a fresh FAT32 filesystem.
+    Format(u64),
+    /// Free space after the last partition, which is below the 16 GiB dualboot minimum.
+    TooSmall(u64),
+    /// No EFI System partition to reuse.
+    NoEsp,
+}
+
+/// Pure keep/wipe decision; `table` is `parted -sm` output for `total_mib`.
+pub fn keep_choice(table: &str, total_mib: u64, esp: Option<&str>, fstype: &str) -> EspChoice {
+    let free = free_mib_from_table(table, total_mib);
+    match esp {
+        None => EspChoice::NoEsp,
+        Some(_) if free < 16384 => EspChoice::TooSmall(free),
+        Some(_) if fstype != "vfat" => EspChoice::Format(free),
+        Some(_) => EspChoice::Reuse(free),
+    }
 }
 
 pub fn dev_name(disk: &str, index: u32) -> String {
@@ -123,11 +199,12 @@ pub fn menu(names: &[String]) -> Vec<String> {
                 .trim()
                 .to_string();
             let listing = listing(&dev);
-            let parts = listing.lines().skip(1).count();
-            let (_, mounted) = usage_from(&listing);
+            // a LUKS mapper is a `crypt` child, not another partition
+            let parts = partition_count(&listing);
+            let in_use = rows(&listing).iter().any(|row| !row.mounts.is_empty());
             let state = if parts == 0 {
                 "empty".to_string()
-            } else if mounted.is_empty() {
+            } else if !in_use {
                 format!("{} partition{}", parts, if parts == 1 { "" } else { "s" })
             } else {
                 format!("{} partitions, in use", parts)
@@ -239,7 +316,10 @@ pub fn swap_device(parts: &[Part], devices: &[String], hibernate: bool) -> Optio
 
 #[cfg(test)]
 mod tests {
-    use super::{disk_names, last_end_from_table, partition_numbers_from_table, usage_from};
+    use super::{
+        EspChoice, disk_names, keep_choice, last_end_from_table, partition_count,
+        partition_numbers_from_table, usage_from,
+    };
 
     #[test]
     fn reads_partition_numbers_from_parted_machine_output() {
@@ -249,10 +329,29 @@ mod tests {
 
     #[test]
     fn finds_mounted_and_swap_partitions() {
-        let listing = "/dev/sda\n/dev/sda1 vfat /boot\n/dev/sda2 swap [SWAP]\n/dev/sda3 ext4 /mnt\n/dev/sda4 swap\n";
-        let (swap, mounted) = usage_from(listing);
-        assert_eq!(swap, ["/dev/sda2"]);
-        assert_eq!(mounted, ["/dev/sda1 on /boot", "/dev/sda3 on /mnt"]);
+        let listing = "NAME=\"/dev/sda\" TYPE=\"disk\" FSTYPE=\"\" MOUNTPOINTS=\"\"\n\
+                       NAME=\"/dev/sda1\" TYPE=\"part\" FSTYPE=\"vfat\" MOUNTPOINTS=\"/boot\"\n\
+                       NAME=\"/dev/sda2\" TYPE=\"part\" FSTYPE=\"swap\" MOUNTPOINTS=\"[SWAP]\"\n\
+                       NAME=\"/dev/sda3\" TYPE=\"part\" FSTYPE=\"ext4\" MOUNTPOINTS=\"/mnt\"\n\
+                       NAME=\"/dev/sda4\" TYPE=\"part\" FSTYPE=\"swap\" MOUNTPOINTS=\"\"\n";
+        let usage = usage_from(listing);
+        assert_eq!(usage.swap, ["/dev/sda2"]);
+        assert_eq!(usage.mounted, ["/dev/sda1 on /boot", "/dev/sda3 on /mnt"]);
+        assert!(usage.crypt.is_empty());
+    }
+
+    #[test]
+    fn mountpoints_with_spaces_stay_one_field() {
+        let listing = "NAME=\"/dev/sdb1\" TYPE=\"part\" FSTYPE=\"exfat\" MOUNTPOINTS=\"/run/media/user/My Disk\"\n";
+        assert_eq!(usage_from(listing).mounted, ["/dev/sdb1 on /run/media/user/My Disk"]);
+    }
+
+    #[test]
+    fn open_luks_mapper_is_not_a_partition() {
+        let listing = "NAME=\"/dev/sda1\" TYPE=\"part\" FSTYPE=\"crypto_LUKS\" MOUNTPOINTS=\"\"\n\
+                       NAME=\"/dev/mapper/root\" TYPE=\"crypt\" FSTYPE=\"ext4\" MOUNTPOINTS=\"\"\n";
+        assert_eq!(partition_count(listing), 1);
+        assert_eq!(usage_from(listing).crypt, ["/dev/mapper/root"]);
     }
 
     #[test]
@@ -266,5 +365,17 @@ mod tests {
         // parted machine output: the disk row starts with /dev/, partition rows with a number
         let table = "BYT;\n/dev/sda:204800MiB:scsi:512:512:gpt:;\n1:1MiB:513MiB:512MiB:fat32:archust-efi:esp;\n3:514MiB:1023MiB:510MiB:ext4:archust-root:;\n";
         assert_eq!(last_end_from_table(table), 1023);
+    }
+
+    #[test]
+    fn keep_choice_reuses_only_a_fat_esp_with_enough_room() {
+        let table = "BYT;\n/dev/sda:204800MiB:scsi:512:512:gpt:;\n1:1MiB:1023MiB:1022MiB:ext4:old-root:;\n";
+        let free = 204800 - 1023 - 1;
+        assert_eq!(keep_choice(table, 204800, Some("/dev/sda1"), "vfat"), EspChoice::Reuse(free));
+        assert_eq!(keep_choice(table, 204800, Some("/dev/sda1"), "ext4"), EspChoice::Format(free));
+        assert_eq!(keep_choice(table, 204800, None, ""), EspChoice::NoEsp);
+
+        let big = "BYT;\n/dev/sda:204800MiB:scsi:512:512:gpt:;\n1:1MiB:190000MiB:189999MiB:ext4:old-root:;\n";
+        assert_eq!(keep_choice(big, 204800, Some("/dev/sda1"), "vfat"), EspChoice::TooSmall(14799));
     }
 }

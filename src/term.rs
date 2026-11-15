@@ -49,6 +49,9 @@ pub fn ask_name(name: &str) -> String {
                 if s.starts_with(|c: char| c.is_ascii_digit()) {
                     return Err("cannot start with a digit");
                 }
+                if s.starts_with('-') {
+                    return Err("cannot start with -");
+                }
                 Ok(())
             })
             .interact_text(),

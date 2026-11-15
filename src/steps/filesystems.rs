@@ -14,6 +14,11 @@ pub struct Formatted {
 
 pub fn format(cfg: &Config, devices: &[String]) -> Formatted {
     say("Filesystems");
+    // an existing ESP chosen for formatting is erased only now, after the final confirmation
+    if cfg.format_esp {
+        let esp = cfg.esp_part.as_deref().unwrap_or_else(|| die("no ESP to format"));
+        sh("mkfs.fat", &["-F32", "-n", "ESP", esp]);
+    }
     let mut esp = cfg.esp_part.clone().unwrap_or_default();
     let mut root_raw = String::new();
     for (i, part) in cfg.parts.iter().enumerate() {

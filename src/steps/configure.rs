@@ -1,8 +1,8 @@
 //! Step 5: locale, keymap, hostname, GRUB, initramfs, sysctl, users, services.
 
-use crate::config::Config;
+use crate::config::{Config, Power};
 use crate::steps::luks;
-use crate::sys::{chroot, quiet, with_stdin, write_file};
+use crate::sys::{MNT, chroot, quiet, with_stdin, write_file};
 use crate::ui::{die, say};
 
 pub fn configure(cfg: &Config, root_dev: &str, raw_dev: &str, swap: &Option<(String, bool)>) {
@@ -74,11 +74,47 @@ fn users(cfg: &Config) {
 fn services(cfg: &Config) {
     say("Services");
     chroot(&["systemctl", "enable", "NetworkManager", "systemd-timesyncd", "fstrim.timer"]);
+    if cfg.bluetooth {
+        quiet("arch-chroot", &[MNT, "systemctl", "enable", "bluetooth.service"]);
+    }
+    if cfg.cups {
+        quiet("arch-chroot", &[MNT, "systemctl", "enable", "cups.service"]);
+    }
+    if cfg.firewall {
+        // deny all inbound, allow outbound: the usual desktop default; open ports later with
+        // `ufw allow <port>` on the installed system
+        write_file("/etc/default/ufw",
+            "DEFAULT_INPUT_POLICY=\"DROP\"\nDEFAULT_OUTPUT_POLICY=\"ACCEPT\"\n\
+             DEFAULT_FORWARD_POLICY=\"DROP\"\nDEFAULT_APPLICATION_POLICY=\"SKIP\"\n\
+             MANAGE_BUILTINS=no\nIPT_SYSCTL=/etc/ufw/sysctl.conf\nIPV6=yes\n");
+        write_file("/etc/ufw/ufw.conf", "ENABLED=yes\nLOGLEVEL=low\n");
+        quiet("arch-chroot", &[MNT, "systemctl", "enable", "ufw.service"]);
+    }
+    match cfg.power {
+        Power::Profiles(profile) => {
+            // power-profiles-daemon reads this state file at boot; writing it makes the chosen
+            // plan the one that starts active
+            write_file("/var/lib/power-profiles-daemon/state.ini", &power_state(
+                profile,
+                crate::sys::exists("/sys/firmware/acpi/platform_profile"),
+            ));
+            quiet("arch-chroot", &[MNT, "systemctl", "enable", "power-profiles-daemon.service"]);
+        }
+        Power::Tlp => quiet("arch-chroot", &[MNT, "systemctl", "enable", "tlp.service"]),
+        Power::Off => {}
+    }
     // the mirrorlist came from the ISO; keep it fresh when reflector is installed
     if cfg.packages.contains(&"reflector") {
         write_file("/etc/xdg/reflector/reflector.conf", &crate::sys::reflector_conf());
-        quiet("arch-chroot", &[crate::sys::MNT, "systemctl", "enable", "reflector.timer"]);
+        quiet("arch-chroot", &[MNT, "systemctl", "enable", "reflector.timer"]);
     }
+}
+
+/// ppd rejects a stored profile when its platform driver differs from the saved one, so name the
+/// driver when this machine exposes `platform_profile`.
+fn power_state(profile: &str, platform: bool) -> String {
+    let driver = if platform { "PlatformDriver=platform_profile\n" } else { "" };
+    format!("[State]\n{}Profile={}\n", driver, profile)
 }
 
 fn hooks_line(cfg: &Config, hibernate: bool) -> String {
@@ -116,7 +152,7 @@ fn grub_default(cfg: &Config, root_uuid: &str, crypt_uuid: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{grub_default, hooks_line};
+    use super::{grub_default, hooks_line, power_state};
     use crate::config::Config;
     use crate::{detect, fs};
 
@@ -125,11 +161,16 @@ mod tests {
             disk: "/dev/sda".into(),
             dual: false,
             esp_part: None,
+            format_esp: false,
             parts: Vec::new(),
             luks,
             multilib: false,
             fs: f,
             gpu: detect::Gpu::Virt,
+            bluetooth: false,
+            firewall: false,
+            cups: false,
+            power: crate::config::Power::Off,
             hostname: "host".into(),
             tz: "UTC".into(),
             keymap: "us".into(),
@@ -163,5 +204,14 @@ mod tests {
         let hooks = hooks_line(&cfg(fs::Fs::Btrfs, true), true);
         let (enc, res) = (hooks.find("encrypt").unwrap(), hooks.find("resume").unwrap());
         assert!(enc < res, "{}", hooks);
+    }
+
+    /// A missing PlatformDriver makes ppd ignore the stored profile on platform-profile laptops.
+    #[test]
+    fn power_state_names_the_platform_driver() {
+        let with = power_state("power-saver", true);
+        assert!(with.contains("PlatformDriver=platform_profile"));
+        assert!(with.ends_with("Profile=power-saver\n"));
+        assert_eq!(power_state("balanced", false), "[State]\nProfile=balanced\n");
     }
 }

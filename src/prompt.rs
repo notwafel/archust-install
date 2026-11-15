@@ -1,6 +1,6 @@
 //! Question sequence, archinstall-style menus over arrow keys, one numbered section per step.
 
-use crate::config::Config;
+use crate::config::{Config, Power};
 use crate::detect;
 use crate::disk;
 use crate::fs::{self, Fs};
@@ -60,6 +60,15 @@ fn extras_for(gpu: detect::Gpu) -> Vec<(&'static str, &'static str)> {
 
 const MULTILIB: [&str; 5] = ["lib32-mesa", "lib32-vulkan-icd-loader", "lib32-libva", "lib32-alsa-plugins", "lib32-gnutls"];
 
+/// Power management: the daemon and, for profiles, the plan that starts active.
+const POWER: [Power; 5] = [
+    Power::Profiles("balanced"),
+    Power::Profiles("power-saver"),
+    Power::Profiles("performance"),
+    Power::Tlp,
+    Power::Off,
+];
+
 const WAYLAND: [&str; 12] = [
     "wayland", "wayland-protocols", "xorg-xwayland", "libxkbcommon", "xkeyboard-config",
     "libinput", "xf86-input-libinput", "seatd", "mesa-utils", "vulkan-tools",
@@ -72,12 +81,14 @@ struct Keep {
     esp_part: Option<String>,
     free_start: u64,
     boot_mib: u64,
+    format_esp: bool,
 }
 
 /// Everything the layout questions produced, before the rest of the answers exist.
 struct Layout {
     dual: bool,
     esp_part: Option<String>,
+    format_esp: bool,
     parts: Vec<layout::Part>,
     hibernate: bool,
 }
@@ -109,6 +120,11 @@ pub fn ask_everything() -> Config {
             extras.extend(pkgs.split(' '));
         }
     }
+    let bluetooth = ask_yes("Bluetooth (bluez, bluetooth.service)?", false);
+    // deny-all incoming is the safe default; ports are opened later with `ufw allow`
+    let firewall = ask_yes("UFW firewall: deny incoming, allow outgoing?", true);
+    let cups = ask_yes("Printing (CUPS, cups.service)?", false);
+    let power = pick("Power management", &POWER, 0);
 
     step(7, STEPS, "System");
     let hostname = ask_name("Hostname");
@@ -159,6 +175,20 @@ pub fn ask_everything() -> Config {
     if layout_answers.dual {
         packages.push("os-prober");
     }
+    if bluetooth {
+        packages.extend(["bluez", "bluez-utils"]);
+    }
+    if firewall {
+        packages.push("ufw");
+    }
+    if cups {
+        packages.push("cups");
+    }
+    match power {
+        Power::Profiles(_) => packages.push("power-profiles-daemon"),
+        Power::Tlp => packages.push("tlp"),
+        Power::Off => {}
+    }
     packages.sort_unstable();
     packages.dedup();
 
@@ -166,11 +196,16 @@ pub fn ask_everything() -> Config {
         disk,
         dual: layout_answers.dual,
         esp_part: layout_answers.esp_part,
+        format_esp: layout_answers.format_esp,
         parts: layout_answers.parts,
         luks,
         multilib,
         fs,
         gpu,
+        bluetooth,
+        firewall,
+        cups,
+        power,
         hostname,
         tz,
         keymap,
@@ -188,29 +223,28 @@ pub fn ask_everything() -> Config {
 /// Steps 2-3: keep the disk or wipe it, then the sizes. Re-asks until the plan fits.
 fn ask_layout(disk: &str, total_mib: u64) -> Layout {
     step(2, STEPS, "Partitioning");
-    let Keep { dual, esp_part, free_start, boot_mib } = if disk::has_partitions(disk) {
-        note(&disk::table(disk));
+    let Keep { dual, esp_part, free_start, boot_mib, format_esp } = if disk::has_partitions(disk) {
+        let table = disk::table(disk);
+        note(&table);
         if ask_yes("Keep the existing partitions and install into the free space?", true) {
-            let free = disk::free_mib(disk, total_mib);
-            match disk::existing_esp(disk) {
-                Some(esp) if free >= 16384 => {
-                    let kind = disk::fs_type(&esp);
-                    if kind != "vfat" {
-                        die(&format!(
-                            "{} is {} - the installer needs a FAT32 ESP, format it or pick another disk",
-                            esp,
-                            if kind.is_empty() { "unformatted" } else { &kind }
-                        ));
+            let esp = disk::existing_esp(disk);
+            let kind = esp.as_deref().map(disk::fs_type).unwrap_or_default();
+            match disk::keep_choice(&table, total_mib, esp.as_deref(), &kind) {
+                disk::EspChoice::Reuse(free) => keep_existing(esp.expect("reuse needs an ESP"), free, disk, false),
+                disk::EspChoice::Format(free) => {
+                    let esp = esp.expect("format needs an ESP");
+                    if ask_format_esp(&esp, &kind) {
+                        keep_existing(esp, free, disk, true)
+                    } else {
+                        warn(&format!("{} cannot hold GRUB as it is", esp));
+                        wipe(disk)
                     }
-                    say(&format!("reusing {} as /boot", esp));
-                    item("free space", &format!("{} MiB", free));
-                    Keep { dual: true, esp_part: Some(esp), free_start: disk::free_start(disk), boot_mib: 0 }
                 }
-                Some(_) => {
+                disk::EspChoice::TooSmall(free) => {
                     warn(&format!("only {} MiB free after the last partition, 16384 MiB needed", free));
                     wipe(disk)
                 }
-                None => {
+                disk::EspChoice::NoEsp => {
                     warn(&format!("{} has no EFI partition, a new one has to be created", disk));
                     wipe(disk)
                 }
@@ -249,8 +283,25 @@ fn ask_layout(disk: &str, total_mib: u64) -> Layout {
         let hibernate = swap_gib >= 1
             && detect::memory_gib() <= swap_gib
             && ask_yes("Hibernate to swap (resume from disk)?", true);
-        return Layout { dual, esp_part, parts, hibernate };
+        return Layout { dual, esp_part, format_esp, parts, hibernate };
     }
+}
+
+fn keep_existing(esp: String, free: u64, disk: &str, format_esp: bool) -> Keep {
+    say(&format!("reusing {} as /boot", esp));
+    item("free space", &format!("{} MiB", free));
+    Keep { dual: true, esp_part: Some(esp), free_start: disk::free_start(disk), boot_mib: 0, format_esp }
+}
+
+/// A stale or unformatted ESP is still usable after a fresh FAT32 filesystem. Destroying it is
+/// never the default, and the format itself waits for the final install confirmation.
+fn ask_format_esp(esp: &str, kind: &str) -> bool {
+    warn(&format!(
+        "{} is {} - GRUB needs a FAT32 ESP",
+        esp,
+        if kind.is_empty() { "unformatted" } else { kind }
+    ));
+    ask_yes(&format!("Format {} as FAT32? this erases everything on it", esp), false)
 }
 
 /// Wipe branch: the disk name has to be typed back, then a fresh EFI partition.
@@ -266,7 +317,7 @@ fn wipe_esp() -> Keep {
     loop {
         let mib = ask_num("EFI partition MiB (1024 recommended, 300 minimum)", 1024);
         if mib >= 300 {
-            return Keep { dual: false, esp_part: None, free_start: 1, boot_mib: mib };
+            return Keep { dual: false, esp_part: None, free_start: 1, boot_mib: mib, format_esp: false };
         }
         warn("the EFI partition needs at least 300 MiB");
     }
@@ -303,9 +354,11 @@ fn ask_system_options() -> (String, String, String, String) {
 
     loop {
         match field {
-            0 => if let Some(value) = pick_fuzzy("Timezone (type to search, Esc = back)", &zones, index_of(&zones, &tz)) {
+            0 => if let Some(value) = pick_fuzzy("Timezone (type to search, Esc = abort)", &zones, index_of(&zones, &tz)) {
                 tz = value;
                 field = 1;
+            } else {
+                die("aborted");
             },
             1 => match pick_fuzzy("Keyboard layout (type to search, Esc = back)", &keymaps, index_of(&keymaps, &keymap)) {
                 Some(value) => { keymap = value; field = 2; }
@@ -409,7 +462,8 @@ fn show_plan(disk: &str, total_mib: u64, layout: &Layout, fs: Fs, luks: bool) {
     item("encryption", if luks { "LUKS2 on root" } else { "none" });
     item("filesystem", &fs.to_string());
     if let Some(e) = &layout.esp_part {
-        item("ESP /boot", &format!("{} (existing)", e));
+        let action = if layout.format_esp { "existing, format as FAT32" } else { "existing" };
+        item("ESP /boot", &format!("{} ({})", e, action));
     }
     for p in &layout.parts {
         let extra = if p.role == layout::Role::Root && luks { " (LUKS2)" } else { "" };

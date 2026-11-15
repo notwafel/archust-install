@@ -57,9 +57,9 @@ Type /dev/nvme0n1 to confirm:
 ```
 
 Arrow keys / `j` `k` move, Enter accepts, space toggles multi-select lists, and `Ctrl-C`
-aborts. In the searchable system pickers, `Esc` returns to the previous field. Invalid hostnames,
-usernames, passwords and impossible partition sizes are re-asked. A wrong wipe confirmation
-aborts the run.
+aborts. In the searchable system pickers, `Esc` returns to the previous field; at the first field
+it aborts the run. Invalid hostnames, usernames, passwords and impossible partition sizes are
+re-asked. A wrong wipe confirmation aborts the run.
 
 ![Controls: arrow keys or j and k to move, Enter to accept, Space to toggle in multi-select lists, Esc or Ctrl-C to abort](assets/controls-dark.svg#gh-dark-mode-only)
 ![Controls: arrow keys or j and k to move, Enter to accept, Space to toggle in multi-select lists, Esc or Ctrl-C to abort](assets/controls-light.svg#gh-light-mode-only)
@@ -78,17 +78,18 @@ re-asked; a wrong typed wipe confirmation aborts.
 | step | section | what | default |
 |---|---|---|---|
 | 1 | Disk | select a whole disk, shown with size, model, partition count and `in use`; the live ISO boot disk is excluded | first listed disk |
-| 2 | Partitioning | reuse an existing ESP and install after the last partition, or wipe | keep existing partitions when present |
+| 2 | Partitioning | reuse an existing ESP and install after the last partition, or wipe; a non-FAT ESP offers formatting | keep existing partitions when present |
 | 3 | Sizes | swap GiB, root GiB (`0` = remaining usable space), EFI size for a wipe | `4`, `0`, `1024` MiB |
 | 4 | Filesystem and encryption | btrfs / ext4 / xfs, optional LUKS, then show the plan | btrfs, LUKS off |
 | 5 | Hardware | kernel, CPU microcode, GPU driver | `linux`, detected CPU, detected GPU |
-| 6 | Packages | multilib, Wayland + XWayland, optional groups (firmware follows the GPU) | all selected |
+| 6 | Packages | multilib, Wayland + XWayland, optional groups (firmware follows the GPU), Bluetooth, UFW, CUPS, power management | all groups selected; Bluetooth, CUPS off; UFW and power-profiles-daemon balanced on |
 | 7 | System | hostname, username, searchable timezone, keymap, locale and login shell | —, —, UTC, us, en_US, bash |
 | 8 | Passwords | LUKS passphrase when selected, user and root passwords | minimum 8 characters, typed twice |
 
 The dualboot branch requires an existing ESP and at least 16 GiB after the last partition. An
-empty disk always takes the wipe branch. A newly created EFI partition must be at least 300 MiB;
-an existing one is reused as is.
+empty disk always takes the wipe branch. A new EFI partition must be at least 300 MiB; an existing
+one is reused as is. A non-FAT32 ESP can be formatted in place after a separate confirmation, or
+the run falls back to the wipe branch.
 
 Hibernation is offered only when swap is at least RAM and at least 1 GiB. The prompt defaults to
 yes, so Enter adds the `resume` hook and `resume=UUID=`. After the last answer, the installer
@@ -96,7 +97,8 @@ prints the selected packages and asks `Start the installation?`; its default is 
 
 Wiping cannot be accepted with Enter: type the disk path exactly. The disk menu shows size, model
 and partition count, and marks a disk `in use` when any partition is mounted or swapped on. Before
-`parted mklabel`, active swap on that disk is switched off and a mounted partition aborts the run.
+`parted mklabel`, active swap on that disk is switched off; a mounted partition or an open LUKS
+mapper aborts the run with the `cryptsetup close` command to run.
 
 ![Safeguards: typed confirmation, mounted source check, live ISO boot disk excluded, ESP verified, multilib read back, firmware names checked](assets/safeguards-dark.svg#gh-dark-mode-only)
 ![Safeguards: typed confirmation, mounted source check, live ISO boot disk excluded, ESP verified, multilib read back, firmware names checked](assets/safeguards-light.svg#gh-light-mode-only)
@@ -119,7 +121,7 @@ and partition count, and marks a disk `in use` when any partition is mounted or 
 
 - GPT, UEFI only. Full wipe or dualboot. Dualboot reuses an existing EFI partition as `/boot` and
   creates new partitions after the last existing one.
-- **btrfs**: `@`, `@home`, `@log`, `@pkg`, `@snapshots` and `@swp`; mounted with
+- **btrfs**: `@`, `@home`, `@log`, `@pkg`, `@snapshots`; mounted with
   `noatime,compress=zstd:1`. **ext4** or **xfs**: one root filesystem mounted with `noatime`.
   `e2fsprogs` or `xfsprogs` is added to `pacstrap` for the selected filesystem.
 - Optional **LUKS2** on the root partition: AES-XTS-plain64, 512-bit key, SHA-512 and Argon2id.
@@ -130,7 +132,9 @@ and partition count, and marks a disk `in use` when any partition is mounted or 
 - Nvidia proprietary and open drivers add `nvidia_drm.modeset=1` and
   `nvidia.NVreg_PreserveVideoMemoryAllocations=1`, initramfs modules, and
   `systemd-udevd` with `PrivateMounts=no`.
-- NetworkManager, `systemd-timesyncd` and `fstrim.timer` are enabled. Bluetooth is not installed.
+- NetworkManager, `systemd-timesyncd` and `fstrim.timer` are always enabled. Optional picks enable
+  `bluetooth.service`, `ufw.service` (incoming denied, outgoing allowed), `cups.service`, and
+  either `power-profiles-daemon.service` with the chosen initial profile or `tlp.service`.
 
 </details>
 
@@ -166,6 +170,12 @@ Selected options:
   bash: bash-completion
   zsh / fish: zsh / fish
 
+Selected services:
+  Bluetooth: bluez bluez-utils
+  Firewall: ufw, deny incoming and allow outgoing
+  Printing: cups
+  Power: power-profiles-daemon (balanced, power-saver or performance) or tlp
+
 Preselected optional groups:
   Nano editor · curl · git · Flatpak · PipeWire audio · Manual pages · Reflector mirrors
   Graphics: Mesa, Vulkan, VA tools
@@ -189,8 +199,8 @@ gets `amd-ucode` plus the NVIDIA packages, an Intel CPU with an AMD card gets `i
 `vulkan-radeon` and `libva-mesa-driver`. `None / other` installs no microcode, which is the right
 answer in a VM or on a CPU vendor the packages do not cover.
 
-The installer validates the three optional firmware names against current repositories before it
-touches the disk. A renamed package stops the run before `pacstrap`.
+The installer resolves the complete selected package list against the current repositories after
+the prompts and before it touches the disk. A renamed package stops the run before `pacstrap`.
 
 </details>
 
@@ -209,10 +219,9 @@ No desktop environment, no browser, no compositor. Archust Install stops at a sy
 - `/etc/sysctl.d/80-gamecompatibility.conf`: `vm.max_map_count = 2147483642` (Proton/Wine/DXVK
   need it) and `vm.swappiness = 10` (Arch defaults to 60, which pushes RAM to swap too early),
   applied with `sysctl --system` during the install.
-- Hibernation: any selected swap partition gets `RESUME=UUID=` in the initramfs configuration.
-  When swap is at least RAM and the hibernation prompt is accepted, it also adds the `resume`
-  hook and `resume=UUID=` through `/etc/default/grub.d/10-resume.cfg`. Swap is enabled directly
-  after `mkswap`, before `genfstab` creates `/etc/fstab`.
+- Hibernation: when swap is at least RAM and the hibernation prompt is accepted, the initramfs
+  gets the `resume` hook and `/etc/default/grub.d/10-resume.cfg` adds `resume=UUID=` to the kernel
+  command line. Swap is enabled directly after `mkswap`, before `genfstab` creates `/etc/fstab`.
 - `fstrim.timer` enabled, so SSD TRIM actually runs.
 - `/etc/sysctl.d/99-no-core-dumps.conf`: `kernel.core_pattern = |/bin/false` - a crash writes no multi-GB dump to disk.
 - multilib: `[multilib]` uncommented in `/etc/pacman.conf`, on the installed system and on the live ISO (so pacstrap can pull the `lib32-*` packages). The target copy is read back and the install stops if it is still commented out.
@@ -295,12 +304,12 @@ Runs the partition arithmetic on fixed cases (wipe, dualboot, swap, fixed root) 
 - **UEFI only**, x86_64.
 - Not tested on real hardware. The TUI and install path have not run on a live ISO yet.
 - Timezones and keymaps are read from the live ISO. UTF-8 locales come from `/etc/locale.gen`.
-  All three use fuzzy search; `Esc` moves back one system picker.
+  All three use fuzzy search; `Esc` moves back one system picker and aborts at the first.
 - GPU detection chooses a default only. It does not validate NVIDIA hardware compatibility with
   the selected driver package.
 - Dualboot needs an existing EFI partition and at least 16 GiB after the last partition. No
-  shrinking or resizing of existing partitions. The existing ESP must already be `vfat`; anything
-  else aborts before the disk is touched.
+  shrinking or resizing of existing partitions. A non-`vfat` ESP must be formatted as FAT32
+  first; declining falls back to the wipe branch.
 - No snapshot tool, zram or encrypted swap.
 - Small installer, not general-purpose. Run `--check` and `cargo test` after each edit.
 

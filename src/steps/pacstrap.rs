@@ -7,15 +7,25 @@ use crate::ui::{die, say};
 
 const LIVE_CONF: &str = "/etc/pacman.conf";
 
+/// Enables `[multilib]` in the live config. The precheck and `base` both call it; the second
+/// call is a no-op.
+pub fn enable_multilib() {
+    let conf = std::fs::read_to_string(LIVE_CONF).unwrap_or_else(|_| die(&format!("cannot read {}", LIVE_CONF)));
+    let enabled = uncomment_multilib(&conf);
+    if enabled == conf {
+        return;
+    }
+    say("multilib: uncommenting [multilib] in pacman.conf");
+    std::fs::write(LIVE_CONF, enabled)
+        .unwrap_or_else(|_| die(&format!("cannot write {}", LIVE_CONF)));
+    sh("pacman", &["-Syy", "--noconfirm"]);
+}
+
 pub fn base(cfg: &Config, swap: &Option<(String, bool)>) {
     if cfg.multilib {
-        say("multilib: uncommenting [multilib] in pacman.conf");
         // the target copy only exists after pacstrap, so only the live copy can be edited now;
         // it is copied into /mnt right after pacstrap
-        let conf = std::fs::read_to_string(LIVE_CONF).unwrap_or_else(|_| die(&format!("cannot read {}", LIVE_CONF)));
-        std::fs::write(LIVE_CONF, uncomment_multilib(&conf))
-            .unwrap_or_else(|_| die(&format!("cannot write {}", LIVE_CONF)));
-        sh("pacman", &["-Syy", "--noconfirm"]);
+        enable_multilib();
     }
 
     say("pacstrap");
@@ -43,14 +53,11 @@ pub fn base(cfg: &Config, swap: &Option<(String, bool)>) {
     write_file("/etc/fstab", &fstab);
 
     // genfstab only sees a formatted swap that is active; `swapon` must come before it
-    if let Some((sw, hibernate)) = swap {
-        write_file("/etc/mkinitcpio.conf.d/10-resume-device.conf",
-            &format!("RESUME=UUID={}\n", crate::steps::filesystems::root_uuid(sw)));
-        if *hibernate {
-            write_file("/etc/default/grub.d/10-resume.cfg",
-                &format!("GRUB_CMDLINE_LINUX_DEFAULT=\"${{GRUB_CMDLINE_LINUX_DEFAULT}} resume=UUID={}\"\n",
-                    crate::steps::filesystems::root_uuid(sw)));
-        }
+    // the current Arch resume hook reads `resume=` from the kernel command line, not RESUME=
+    if let Some((sw, true)) = swap {
+        write_file("/etc/default/grub.d/10-resume.cfg",
+            &format!("GRUB_CMDLINE_LINUX_DEFAULT=\"${{GRUB_CMDLINE_LINUX_DEFAULT}} resume=UUID={}\"\n",
+                crate::steps::filesystems::root_uuid(sw)));
     }
 }
 

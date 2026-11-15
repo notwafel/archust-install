@@ -55,25 +55,24 @@ mount -o remount,size=4G /run/archiso/cowspace    # only below 2 GiB free
 
 The remount failure is a warning, not fatal.
 
-### Keyring, helper packages and mirrors
+### Keyring and mirrors
 
 ```sh
 pacman-key --init
-pacman -Sy --needed --noconfirm archlinux-keyring
 pacman-key --populate archlinux
-pacman -Sy --needed --noconfirm reflector
+pacman -Sy --noconfirm
 reflector \
   --country <trusted-country-list> \
   --protocol https \
   --latest 10 \
   --sort rate \
   --save /etc/pacman.d/mirrorlist
-pacman -Sy --needed --noconfirm btrfs-progs gptfdisk dosfstools cryptsetup
-pacman -Sy --needed --noconfirm archlinux-keyring
-pacman-key --populate archlinux
-pacman -Sp --needed --noconfirm \
-  linux-firmware-intel linux-firmware-realtek linux-firmware-nvidia
 ```
+
+The official ISO already ships `reflector`, `mkfs.fat`, `btrfs` and `cryptsetup`; the installer
+checks that the binaries exist and refuses to install any of them by name. A named `pacman -S`
+against a newer repository can pull a newer `glibc` or `pacman` into the live tmpfs and leave the
+running system half upgraded.
 
 The installer writes the same reflector flags to:
 
@@ -83,6 +82,16 @@ The installer writes the same reflector flags to:
 
 It then requires at least one `Server = https://...` line in the new mirrorlist. All commands in
 this section except the cowspace remount are fatal on failure.
+
+The complete target package list is resolved after the prompts, before the disk is touched:
+
+```sh
+pacman -Sp --needed --noconfirm <base-packages> <chosen-packages>
+```
+
+With multilib selected, `[multilib]` is uncommented in the live `/etc/pacman.conf` and the database
+is refreshed first. `-Sp` only prints URLs; a missing or renamed package aborts before
+`parted mklabel`.
 
 ## 2. Prompt flow
 
@@ -124,8 +133,10 @@ this section except the cowspace remount are fatal on failure.
      blkid -s TYPE -o value <efi-device>
      ```
 
-     The reused ESP must report `vfat`. Any other or empty type aborts before the disk is
-     written.
+     The reused ESP must report `vfat`. Any other or empty type offers a separate
+     `Format <device> as FAT32?` confirmation; declining falls back to the wipe branch with its
+     typed confirmation. `mkfs.fat -F32 -n ESP <efi-device>` runs in the filesystem step, after
+     the final `Start the installation?` confirmation.
    - Wipe requires the exact disk path typed back. EFI size must be at least 300 MiB.
 
 3. **Sizes**
@@ -155,20 +166,27 @@ this section except the cowspace remount are fatal on failure.
    - Wayland + XWayland default: enabled.
    - Optional groups default: selected. The firmware group follows the GPU: none for a VM,
      Intel/Realtek for Intel and AMD, plus NVIDIA firmware for NVIDIA and nouveau.
+   - Bluetooth default: off (`bluez`, `bluez-utils`).
+   - UFW firewall default: on, `DEFAULT_INPUT_POLICY="DROP"`, output and established traffic
+     allowed, IPv6 enabled.
+   - CUPS printing default: off (`cups`).
+   - Power management default: `power-profiles-daemon` with the `balanced` profile; the picker
+     also offers `power-saver`, `performance`, `tlp` or none.
 
 7. **System**
    - Hostname and username: lowercase ASCII letters, digits, `-`, `_`; 1–31 characters; no
-     leading digit.
+     leading digit or `-`.
    - Timezones come from `/usr/share/zoneinfo`; keymaps from `/usr/share/kbd/keymaps`; UTF-8
      locales from `/etc/locale.gen`.
-   - Timezone, keymap, locale and shell use fuzzy search. `Esc` returns to the previous picker.
+   - Timezone, keymap, locale and shell use fuzzy search. `Esc` returns to the previous picker;
+     at the timezone picker it aborts.
 
 8. **Passwords**
    - LUKS passphrase only when LUKS is selected.
    - User and root passwords always required.
    - Minimum length: 8 characters. Every password is typed twice.
 
-Before destructive work, the installer prints the package list and asks:
+Before destructive work, the installer resolves the package list and prints it, then asks:
 
 ```text
 Start the installation? [default: no]
@@ -179,12 +197,14 @@ Start the installation? [default: no]
 Full wipe first reads the partitions of the disk:
 
 ```sh
-lsblk -lpno NAME,FSTYPE,MOUNTPOINTS <disk>
+lsblk -lpno NAME,TYPE,FSTYPE,MOUNTPOINTS -P <disk>
 ```
 
-A partition with `FSTYPE=swap` and the `[SWAP]` mountpoint is active and switched off with
-`swapoff <device>` (`-p` makes the names absolute); a mounted partition aborts
-with its device and mountpoint. Then it runs:
+`-P` keeps a mountpoint with spaces in one field. A partition with `FSTYPE=swap` and the
+`[SWAP]` mountpoint is active and switched off with `swapoff <device>` (`-p` makes the names
+absolute). A `TYPE=crypt` child is an open LUKS mapper: the run aborts and prints
+`cryptsetup close <mapper>`; it is never closed automatically. A mounted partition aborts with its
+device and mountpoint. Then it runs:
 
 ```sh
 parted -s <disk> mklabel gpt
@@ -218,7 +238,7 @@ as:
 For every planned partition:
 
 ```sh
-mkfs.fat -F32 -n ESP <efi-device>    # new EFI only
+mkfs.fat -F32 -n ESP <efi-device>    # new EFI, or an existing ESP chosen for formatting
 mkswap -L swap <swap-device>
 swapon <swap-device>
 ```
@@ -247,14 +267,14 @@ mkfs.xfs -f -L archust <root>                       # xfs
 mount -o noatime <root> /mnt                         # ext4 or xfs
 mkfs.btrfs -f -L archust <root>                     # btrfs
 mount <root> /mnt                                    # btrfs: temporary top-level mount
-btrfs subvolume create /mnt/@                         # btrfs, then @home @log @pkg @snapshots @swp
+btrfs subvolume create /mnt/@                         # btrfs, then @home @log @pkg @snapshots
 umount /mnt                                           # btrfs
 mount -o subvol=@,noatime,compress=zstd:1 <root> /mnt # btrfs
 modprobe vfat                                         # fatal if the running kernel has no vfat
 mount -t vfat <efi-device> /mnt/boot
 ```
 
-For btrfs, the temporary top-level mount creates all six subvolumes before mounting `@` as root:
+For btrfs, the temporary top-level mount creates all five subvolumes before mounting `@` as root:
 
 ```text
 @          /
@@ -262,7 +282,6 @@ For btrfs, the temporary top-level mount creates all six subvolumes before mount
 @log       /var/log
 @pkg       /var/cache/pacman/pkg
 @snapshots /.snapshots
-@swp       /swap
 ```
 
 ## 5. Pacstrap, multilib, fstab and resume
@@ -285,19 +304,15 @@ genfstab -U /mnt
 
 `<filesystem-package>` is `e2fsprogs` for ext4, `xfsprogs` for xfs, nothing extra for btrfs.
 
-Any swap creates:
-
-```text
-/mnt/etc/mkinitcpio.conf.d/10-resume-device.conf
-RESUME=UUID=<swap-uuid>
-```
-
-Accepted hibernation also creates:
+Accepted hibernation creates:
 
 ```text
 /mnt/etc/default/grub.d/10-resume.cfg
 GRUB_CMDLINE_LINUX_DEFAULT="${GRUB_CMDLINE_LINUX_DEFAULT} resume=UUID=<swap-uuid>"
 ```
+
+No `RESUME=` file is written: the current Arch `resume` hook reads `resume=` from the kernel
+command line.
 
 ## 6. Target configuration
 
@@ -312,6 +327,9 @@ The installer writes, then runs:
 /mnt/etc/sysctl.d/80-gamecompatibility.conf
 /mnt/etc/sysctl.d/99-no-core-dumps.conf
 /mnt/etc/default/grub
+/mnt/etc/default/ufw                                    # UFW only
+/mnt/etc/ufw/ufw.conf                                   # UFW only
+/mnt/var/lib/power-profiles-daemon/state.ini            # power profiles only
 ```
 
 LUKS or accepted hibernation adds `/mnt/etc/mkinitcpio.conf.d/10-hooks.conf`. Nvidia proprietary
@@ -328,7 +346,17 @@ arch-chroot /mnt mkinitcpio -P
 arch-chroot /mnt grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=GRUB
 arch-chroot /mnt grub-mkconfig -o /boot/grub/grub.cfg
 arch-chroot /mnt systemctl enable NetworkManager systemd-timesyncd fstrim.timer
+arch-chroot /mnt systemctl enable bluetooth.service        # Bluetooth only
+arch-chroot /mnt systemctl enable cups.service             # CUPS only
+arch-chroot /mnt systemctl enable ufw.service              # firewall only
+arch-chroot /mnt systemctl enable power-profiles-daemon.service  # profiles only
+arch-chroot /mnt systemctl enable tlp.service              # tlp only
 ```
+
+The optional service enables go through `quiet(...)`; failure is ignored. `state.ini` contains
+`[State]` and `Profile=<balanced|power-saver|performance>` so the chosen plan is active on first
+boot; when the live hardware exposes `/sys/firmware/acpi/platform_profile`, it also stores
+`PlatformDriver=platform_profile` so power-profiles-daemon does not reject the saved profile.
 
 Required check:
 

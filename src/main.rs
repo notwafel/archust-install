@@ -26,6 +26,7 @@ fn run() {
     sys::require_live_iso();
     sys::prepare_mirrors();
     let cfg = prompt::ask_everything();
+    sys::check_packages(&cfg.packages, cfg.multilib);
     ui::say(&format!("Packages ({}): {}", cfg.packages.len(), cfg.packages.join(" ")));
     if !term::ask_yes("Start the installation?", false) {
         ui::die("aborted");
