@@ -81,7 +81,7 @@ re-asked; a wrong typed wipe confirmation aborts.
 | 2 | Partitioning | reuse an existing ESP and install after the last partition, or wipe | keep existing partitions when present |
 | 3 | Sizes | swap GiB, root GiB (`0` = remaining usable space), EFI size for a wipe | `4`, `0`, `1024` MiB |
 | 4 | Filesystem and encryption | btrfs / ext4 / xfs, optional LUKS, then show the plan | btrfs, LUKS off |
-| 5 | Hardware | kernel and GPU driver | `linux`, detected GPU |
+| 5 | Hardware | kernel, CPU microcode, GPU driver | `linux`, detected CPU, detected GPU |
 | 6 | Packages | multilib, Wayland + XWayland, optional groups (firmware follows the GPU) | all selected |
 | 7 | System | hostname, username, searchable timezone, keymap, locale and login shell | —, —, UTC, us, en_US, bash |
 | 8 | Passwords | LUKS passphrase when selected, user and root passwords | minimum 8 characters, typed twice |
@@ -142,7 +142,7 @@ installer runs `findmnt -S <disk>` and aborts when it finds a mounted source.
 Always:
   base base-devel linux-headers linux-firmware dkms locales
   grub efibootmgr dosfstools mtools networkmanager sudo
-  selected kernel; intel-ucode or amd-ucode when detected
+  selected kernel; selected CPU microcode
 
 Selected GPU:
   Intel: vulkan-intel intel-media-driver
@@ -183,9 +183,10 @@ gets no firmware group at all.
 matching `linux-lts-headers` or `linux-zen-headers`; do that manually before using DKMS on either
 kernel.
 
-CPU microcode follows the CPU vendor and is independent of the GPU: an AMD CPU with an NVIDIA card
+CPU microcode is its own prompt and is independent of the GPU: an AMD CPU with an NVIDIA card
 gets `amd-ucode` plus the NVIDIA packages, an Intel CPU with an AMD card gets `intel-ucode` plus
-`vulkan-radeon` and `libva-mesa-driver`.
+`vulkan-radeon` and `libva-mesa-driver`. `None / other` installs no microcode, which is the right
+answer in a VM or on a CPU vendor the packages do not cover.
 
 The installer validates the three optional firmware names against current repositories before it
 touches the disk. A renamed package stops the run before `pacstrap`.

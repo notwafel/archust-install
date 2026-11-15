@@ -5,6 +5,14 @@ versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.5] - 2026-11-15
+
+### Changed
+
+- CPU microcode is a prompt (`Intel`, `AMD`, `None / other`) instead of a silent detection. In a
+  VM the detected host CPU no longer decides what the guest installs, and `None / other` skips
+  microcode entirely.
+
 ## [0.2.4] - 2026-11-15
 
 ### Fixed

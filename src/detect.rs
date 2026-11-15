@@ -1,4 +1,5 @@
-//! Hardware detection: GPU family, CPU microcode.
+//! Hardware detection: GPU family, CPU microcode. Detection only picks the default; the
+//! prompts let the user override it, a VM host CPU says nothing about the target system.
 
 use crate::sys::out;
 use crate::term::pick;
@@ -15,6 +16,35 @@ const LABELS: [&str; 6] = [
     "NVIDIA legacy (nouveau)",
     "VM / no dedicated GPU",
 ];
+
+const CPU_LABELS: [&str; 3] = [
+    "Intel (intel-ucode)",
+    "AMD (amd-ucode)",
+    "None / other (no microcode)",
+];
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Cpu { Intel, Amd, None }
+
+impl Cpu {
+    fn detect() -> Cpu {
+        let cpuinfo = std::fs::read_to_string("/proc/cpuinfo").unwrap_or_default();
+        let vendor = cpuinfo.lines().find(|l| l.starts_with("vendor_id"));
+        match vendor {
+            Some(l) if l.contains("Intel") => Cpu::Intel,
+            Some(l) if l.contains("AMD") => Cpu::Amd,
+            _ => Cpu::None,
+        }
+    }
+
+    pub fn ucode(self) -> Option<&'static str> {
+        match self {
+            Cpu::Intel => Some("intel-ucode"),
+            Cpu::Amd => Some("amd-ucode"),
+            Cpu::None => None,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Gpu { Intel, Amd, Nvidia, NvidiaOpen, Nouveau, Virt }
@@ -90,6 +120,13 @@ fn companion_from(gpus: &str) -> Option<Gpu> {
     }
 }
 
+pub fn ask_cpu() -> Cpu {
+    const ORDER: [Cpu; 3] = [Cpu::Intel, Cpu::Amd, Cpu::None];
+    let default = ORDER.iter().position(|c| *c == Cpu::detect()).unwrap_or(2);
+    let label = pick("CPU microcode", &CPU_LABELS, default);
+    ORDER[CPU_LABELS.iter().position(|l| *l == label).unwrap_or(2)]
+}
+
 pub fn ask_gpu() -> Gpu {
     let detected = Gpu::detect();
     let default = CHOICES.iter().position(|g| *g == detected).unwrap_or(5);
@@ -106,16 +143,6 @@ pub fn memory_gib() -> u64 {
         .and_then(|v| v.parse().ok())
         .unwrap_or(0);
     kb.div_ceil(1048576)
-}
-
-pub fn cpu_ucode() -> Option<&'static str> {
-    let cpuinfo = std::fs::read_to_string("/proc/cpuinfo").unwrap_or_default();
-    let vendor = cpuinfo.lines().find(|l| l.starts_with("vendor_id"));
-    match vendor {
-        Some(l) if l.contains("Intel") => Some("intel-ucode"),
-        Some(l) if l.contains("AMD") => Some("amd-ucode"),
-        _ => None,
-    }
 }
 
 #[cfg(test)]

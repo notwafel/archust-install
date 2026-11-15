@@ -94,6 +94,7 @@ pub fn ask_everything() -> Config {
 
     step(5, STEPS, "Hardware");
     let kernel = pick("Kernel", &KERNELS, 0);
+    let cpu = detect::ask_cpu();
     let gpu = detect::ask_gpu();
 
     step(6, STEPS, "Packages");
@@ -129,7 +130,7 @@ pub fn ask_everything() -> Config {
     {
         packages.extend(igpu.packages());
     }
-    if let Some(ucode) = detect::cpu_ucode() {
+    if let Some(ucode) = cpu.ucode() {
         packages.push(ucode);
     }
     if wayland {

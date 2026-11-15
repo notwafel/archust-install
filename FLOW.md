@@ -143,9 +143,10 @@ this section except the cowspace remount are fatal on failure.
    lspci -nn
    ```
 
-   This selects the default GPU entry. CPU vendor comes from `/proc/cpuinfo` for microcode and is
-   independent of the GPU. On a hybrid laptop the picker defaults to NVIDIA; when a second
-   display controller is Intel or AMD, its `vulkan-*` and `libva-*` packages are added as well.
+   `lspci -nn` only picks the default GPU entry and `/proc/cpuinfo` only the default microcode
+   entry; both are prompts and can be overridden. `None / other` installs no microcode. On a
+   hybrid laptop the GPU picker defaults to NVIDIA; when a second display controller is Intel or
+   AMD, its `vulkan-*` and `libva-*` packages are added as well.
 
 6. **Packages**
    - Multilib default: enabled.
