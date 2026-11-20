@@ -382,8 +382,8 @@ The installer writes, then runs:
 /mnt/var/lib/power-profiles-daemon/state.ini            # power profiles only
 ```
 
-LUKS or accepted hibernation adds `/mnt/etc/mkinitcpio.conf.d/10-hooks.conf`. Nvidia proprietary
-or open adds `/mnt/etc/mkinitcpio.conf.d/10-nvidia.conf` and the `systemd-udevd` drop-in.
+LUKS or accepted hibernation adds `/mnt/etc/mkinitcpio.conf.d/10-hooks.conf`. Nvidia adds
+`/mnt/etc/mkinitcpio.conf.d/10-nvidia.conf` and the `systemd-udevd` drop-in.
 
 Commands run inside `/mnt`:
 

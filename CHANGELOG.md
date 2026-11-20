@@ -3,6 +3,19 @@
 All notable changes to Archust Install. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [0.4.2] - 2026-11-20
+
+### Fixed
+
+- **The package precheck no longer dies with `not in the repos`.** Three names did not exist in
+  the current repositories: `locales` (always selected; `glibc` already ships `locale-gen` and
+  `/etc/locale.gen`), `nvidia-dkms` (Turing+ now uses `nvidia-open-dkms`, the only packaged
+  module) and `libva-mesa-driver` (merged into `mesa`). The GPU picker now offers one NVIDIA
+  option instead of two identical kernel modules.
+- **The package probe prints pacman's own error** and only says "not in the repos" when pacman
+  actually reported a missing target; a broken mirror or repository database now keeps its own
+  message.
+
 ## [0.4.1] - 2026-11-20
 
 ### Fixed

@@ -4,15 +4,16 @@
 use crate::sys::out;
 use crate::term::pick;
 
-const CHOICES: [crate::detect::Gpu; 6] = [
-    Gpu::Intel, Gpu::Amd, Gpu::Nvidia, Gpu::NvidiaOpen, Gpu::Nouveau, Gpu::Virt,
+const CHOICES: [crate::detect::Gpu; 5] = [
+    Gpu::Intel, Gpu::Amd, Gpu::Nvidia, Gpu::Nouveau, Gpu::Virt,
 ];
 
-const LABELS: [&str; 6] = [
+// the proprietary kernel module is no longer packaged for Turing+; `nvidia-open-dkms` is the
+// only module that builds against the chosen kernel, and `nvidia-utils` still comes with it
+const LABELS: [&str; 5] = [
     "Intel",
     "AMD",
-    "NVIDIA proprietary (nvidia-dkms, Turing+)",
-    "NVIDIA open kernel module (nvidia-open-dkms, Turing+)",
+    "NVIDIA (nvidia-open-dkms, Turing+)",
     "NVIDIA legacy (nouveau)",
     "VM / no dedicated GPU",
 ];
@@ -47,7 +48,7 @@ impl Cpu {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum Gpu { Intel, Amd, Nvidia, NvidiaOpen, Nouveau, Virt }
+pub enum Gpu { Intel, Amd, Nvidia, Nouveau, Virt }
 
 /// Display-controller lines only: `lspci` also lists Intel audio, USB and SATA chipsets.
 fn display_lines() -> String {
@@ -66,7 +67,6 @@ impl Gpu {
             Gpu::Intel => "intel",
             Gpu::Amd => "amd",
             Gpu::Nvidia => "nvidia",
-            Gpu::NvidiaOpen => "nvidia-open",
             Gpu::Nouveau => "nouveau",
             Gpu::Virt => "virt",
         }
@@ -88,15 +88,15 @@ impl Gpu {
     pub fn packages(self) -> &'static [&'static str] {
         match self {
             Gpu::Intel => &["vulkan-intel", "intel-media-driver"],
-            Gpu::Amd => &["vulkan-radeon", "libva-mesa-driver"],
-            Gpu::Nvidia => &["nvidia-dkms", "nvidia-utils", "libva-nvidia-driver"],
-            Gpu::NvidiaOpen => &["nvidia-open-dkms", "nvidia-utils", "libva-nvidia-driver"],
+            // libva-mesa-driver was merged into mesa; nothing to add for VA-API here
+            Gpu::Amd => &["vulkan-radeon"],
+            Gpu::Nvidia => &["nvidia-open-dkms", "nvidia-utils", "libva-nvidia-driver"],
             Gpu::Nouveau | Gpu::Virt => &[],
         }
     }
 
     pub fn nvidia(self) -> bool {
-        matches!(self, Gpu::Nvidia | Gpu::NvidiaOpen)
+        matches!(self, Gpu::Nvidia)
     }
 }
 

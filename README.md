@@ -137,7 +137,7 @@ before any prompt: the install always ends with an x86_64 EFI GRUB.
 - **GRUB** EFI: `--target=x86_64-efi`, `GRUB_TERMINAL=console`, `GRUB_TIMEOUT=3`,
   `loglevel=3 quiet rw`, `os-prober` enabled. The install checks for
   `/boot/EFI/GRUB/grubx64.efi` after `grub-install`.
-- Nvidia proprietary and open drivers add `nvidia_drm.modeset=1` and
+- Nvidia adds `nvidia_drm.modeset=1` and
   `nvidia.NVreg_PreserveVideoMemoryAllocations=1`, initramfs modules, and
   `systemd-udevd` with `PrivateMounts=no`.
 - NetworkManager, `systemd-timesyncd` and `fstrim.timer` are always enabled. Optional picks enable
@@ -153,22 +153,22 @@ before any prompt: the install always ends with an x86_64 EFI GRUB.
 
 ```text
 Always:
-  base base-devel linux-firmware dkms locales
+  base base-devel linux-firmware dkms
   grub efibootmgr dosfstools mtools networkmanager sudo
   selected kernel and its headers; selected CPU microcode
 
 Selected GPU:
   Intel: vulkan-intel intel-media-driver
-  AMD: vulkan-radeon libva-mesa-driver
-  NVIDIA: nvidia-dkms or nvidia-open-dkms, nvidia-utils, libva-nvidia-driver
+  AMD: vulkan-radeon (VA-API comes from mesa)
+  NVIDIA: nvidia-open-dkms, nvidia-utils, libva-nvidia-driver
   nouveau / VM: no additional GPU packages
 
   Hybrid with NVIDIA (Intel or AMD integrated GPU also present):
-  the NVIDIA set plus vulkan-intel intel-media-driver or vulkan-radeon libva-mesa-driver
+  the NVIDIA set plus vulkan-intel intel-media-driver or vulkan-radeon
 
 Selected options:
   multilib: lib32-mesa lib32-vulkan-icd-loader lib32-libva lib32-alsa-plugins lib32-gnutls
-            plus lib32-nvidia-utils for NVIDIA proprietary or open
+            plus lib32-nvidia-utils for NVIDIA
   Wayland: wayland wayland-protocols xorg-xwayland libxkbcommon xkeyboard-config
            libinput xf86-input-libinput seatd mesa-utils vulkan-tools xdg-desktop-portal xdg-utils
   ext4: e2fsprogs
@@ -199,12 +199,12 @@ OpenGL, Vulkan and video-acceleration tooling. `Firmware` adds `linux-firmware-i
 gets no firmware group at all.
 
 The selected kernel's headers are installed with it: `linux-headers`, `linux-lts-headers` or
-`linux-zen-headers`. That is what `nvidia-dkms` and `nvidia-open-dkms` build against, so NVIDIA
+`linux-zen-headers`. That is what `nvidia-open-dkms` builds against, so NVIDIA
 on `linux-lts` or `linux-zen` works without adding headers by hand.
 
 CPU microcode is its own prompt and is independent of the GPU: an AMD CPU with an NVIDIA card
 gets `amd-ucode` plus the NVIDIA packages, an Intel CPU with an AMD card gets `intel-ucode` plus
-`vulkan-radeon` and `libva-mesa-driver`. `None / other` installs no microcode, which is the right
+`vulkan-radeon`. `None / other` installs no microcode, which is the right
 answer in a VM or on a CPU vendor the packages do not cover.
 
 The installer resolves the complete selected package list against the current repositories after

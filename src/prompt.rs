@@ -22,8 +22,10 @@ const ZONES: [&str; 15] = [
     "Asia/Tokyo", "Australia/Sydney",
 ];
 
-const BASE: [&str; 11] = [
-    "base", "base-devel", "linux-firmware", "dkms", "locales",
+// `locales` is not an Arch package: glibc ships `locale-gen` and `/etc/locale.gen`, and the
+// configure step generates the chosen locale
+const BASE: [&str; 10] = [
+    "base", "base-devel", "linux-firmware", "dkms",
     "grub", "efibootmgr", "dosfstools", "mtools", "networkmanager", "sudo",
 ];
 
@@ -46,7 +48,7 @@ fn extras_for(gpu: detect::Gpu) -> Vec<(&'static str, &'static str)> {
     let mut groups = EXTRAS.to_vec();
     match gpu {
         detect::Gpu::Virt => {}
-        detect::Gpu::Nvidia | detect::Gpu::NvidiaOpen | detect::Gpu::Nouveau => groups.push((
+        detect::Gpu::Nvidia | detect::Gpu::Nouveau => groups.push((
             "Firmware: Intel, Realtek, NVIDIA",
             "linux-firmware-intel linux-firmware-realtek linux-firmware-nvidia",
         )),
@@ -157,7 +159,7 @@ pub fn ask_everything() -> Config {
     let mut packages = BASE.to_vec();
     packages.extend(extras);
     packages.push(kernel);
-    // nvidia-dkms/nvidia-open-dkms build against the installed kernel, so its headers must
+    // nvidia-open-dkms builds against the installed kernel, so its headers must
     // match the selected kernel, not blindly the `linux` package
     packages.push(kernel_headers(kernel));
     packages.extend(gpu.packages());

@@ -1,6 +1,6 @@
 //! Thin wrappers over the programs the installer shells out to.
 
-use crate::ui::die;
+use crate::ui::{die, warn};
 use std::fs;
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -149,9 +149,25 @@ pub fn check_packages(packages: &[&str], multilib: bool) {
     // resolve in the repos for pacstrap inside the empty target
     let mut args = vec!["-Sp", "--noconfirm"];
     args.extend_from_slice(packages);
-    if out("pacman", &args).is_none() {
-        die(&format!("not in the repos: {}", packages.join(" ")));
+    // the probe used to drop pacman's output, so a stale mirror or a repo error was reported as
+    // a missing package; only `-Sp` errors are about packages, everything else keeps its message
+    let o = Command::new("pacman").args(&args).output().unwrap_or_else(|e| die(&format!("pacman: {}", e)));
+    let stderr = String::from_utf8_lossy(&o.stderr);
+    if !o.status.success() {
+        for line in stderr.lines().filter(|l| l.starts_with("error:")) {
+            warn(line);
+        }
+        // a package that simply is not in a repo gets it named; repo and mirror trouble does not
+        if missing_package(&stderr) {
+            die("a package is not in the repos, see the pacman error above");
+        }
+        die("cannot resolve the package list, see the pacman errors above");
     }
+}
+
+/// `-Sp` failed because of a package name, not a mirror or a repo database.
+fn missing_package(stderr: &str) -> bool {
+    stderr.contains("target not found") || stderr.contains("was not found")
 }
 
 /// remounts the archiso copy-on-write layer bigger; `pacstrap` alone needs a few GB there
@@ -190,9 +206,17 @@ fn quiet_ok(program: &str, args: &[&str]) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{reflector_args, reflector_conf};
+    use super::{missing_package, reflector_args, reflector_conf};
 
-    /// reflector's config parser wants one flag per line, starting with `--`.
+    /// A missing package must not be confused with a mirror or database failure.
+    #[test]
+    fn package_errors_are_told_apart_from_repo_errors() {
+        assert!(missing_package("error: target not found: nvidia-utills\n"));
+        assert!(!missing_package(
+            "error: failed retrieving file 'core.db' from mirror.example: Could not resolve host\n"
+        ));
+    }
+
     #[test]
     fn reflector_conf_is_one_flag_per_line() {
         let conf = reflector_conf();
