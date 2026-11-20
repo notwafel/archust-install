@@ -61,22 +61,27 @@ pub fn base(cfg: &Config, swap: &Option<(String, bool)>) {
     }
 }
 
-/// Uncomments the `[multilib]` repo block, keeping everything else untouched.
+/// Uncomments the `[multilib]` repo block, keeping everything else untouched. The block ends at
+/// the next header, commented or not, and only repo directives lose their `#`.
 pub fn uncomment_multilib(conf: &str) -> String {
+    const DIRECTIVES: [&str; 5] = ["Include", "Server", "SigLevel", "Usage", "CacheServer"];
     let mut out = String::with_capacity(conf.len() + 64);
     let mut inside = false;
     for line in conf.lines() {
         let t = line.trim();
-        if inside {
-            if t.starts_with('[') {
-                inside = false;
-                out.push_str(line);
+        let header = t.trim_start_matches('#').trim();
+        if header.starts_with('[') {
+            inside = header == "[multilib]";
+            out.push_str(if inside { "[multilib]" } else { line });
+        } else if inside && t.starts_with('#') {
+            let body = t.trim_start_matches('#').trim_start();
+            // only `Key = value` directives; a comment like `#Include extra repos` must stay
+            let directive = body.split_once('=').is_some_and(|(key, _)| DIRECTIVES.contains(&key.trim()));
+            if directive {
+                out.push_str(body);
             } else {
-                out.push_str(t.strip_prefix("# ").or_else(|| t.strip_prefix('#')).unwrap_or(t));
+                out.push_str(line);
             }
-        } else if t.starts_with('#') && t.contains("[multilib]") {
-            inside = true;
-            out.push_str("[multilib]");
         } else {
             out.push_str(line);
         }
@@ -102,5 +107,18 @@ mod tests {
     fn idempotent() {
         let once = uncomment_multilib(IN);
         assert_eq!(once, uncomment_multilib(&once));
+    }
+
+    #[test]
+    fn leaves_later_commented_sections_alone() {
+        // custom ISOs append a commented [custom] repo after [multilib]; uncommenting it makes
+        // pacman fetch file:///home/custompkgs/custom.db and fail every sync
+        const ISO: &str = "[core]\nInclude = /etc/pacman.d/mirrorlist\n\n#[multilib]\n#Include = /etc/pacman.d/mirrorlist\n## Include extra repos\n\n## do not touch\n\n#[multilib-testing]\n#Include = /etc/pacman.d/mirrorlist\n\n#[custom]\n#SigLevel = Optional TrustAll\n#Server = file:///home/custompkgs\n";
+        let out = uncomment_multilib(ISO);
+        assert!(out.contains("[multilib]\nInclude = /etc/pacman.d/mirrorlist"));
+        assert!(out.contains("## Include extra repos"));
+        assert!(out.contains("## do not touch"));
+        assert!(out.contains("#[multilib-testing]"));
+        assert!(out.contains("#[custom]\n#SigLevel = Optional TrustAll\n#Server = file:///home/custompkgs"));
     }
 }

@@ -39,7 +39,8 @@ pub fn configure(cfg: &Config, root_dev: &str, raw_dev: &str, swap: &Option<(Str
     }
 
     chroot(&["ln", "-sf", &format!("/usr/share/zoneinfo/{}", cfg.tz), "/etc/localtime"]);
-    chroot(&["hwclock", "--systohc"]);
+    // no RTC in some VMs; the timezone is already set and timesyncd fixes the clock at boot
+    quiet("arch-chroot", &[MNT, "hwclock", "--systohc"]);
     chroot(&["locale-gen"]);
     chroot(&["sysctl", "--system"]);
     chroot(&["mkinitcpio", "-P"]);
@@ -75,10 +76,11 @@ fn services(cfg: &Config) {
     say("Services");
     chroot(&["systemctl", "enable", "NetworkManager", "systemd-timesyncd", "fstrim.timer"]);
     if cfg.bluetooth {
-        quiet("arch-chroot", &[MNT, "systemctl", "enable", "bluetooth.service"]);
+        // fatal: silently leaving the chosen service disabled looks like a working install
+        chroot(&["systemctl", "enable", "bluetooth.service"]);
     }
     if cfg.cups {
-        quiet("arch-chroot", &[MNT, "systemctl", "enable", "cups.service"]);
+        chroot(&["systemctl", "enable", "cups.service"]);
     }
     if cfg.firewall {
         // deny all inbound, allow outbound: the usual desktop default; open ports later with
@@ -88,7 +90,7 @@ fn services(cfg: &Config) {
              DEFAULT_FORWARD_POLICY=\"DROP\"\nDEFAULT_APPLICATION_POLICY=\"SKIP\"\n\
              MANAGE_BUILTINS=no\nIPT_SYSCTL=/etc/ufw/sysctl.conf\nIPV6=yes\n");
         write_file("/etc/ufw/ufw.conf", "ENABLED=yes\nLOGLEVEL=low\n");
-        quiet("arch-chroot", &[MNT, "systemctl", "enable", "ufw.service"]);
+        chroot(&["systemctl", "enable", "ufw.service"]);
     }
     match cfg.power {
         Power::Profiles(profile) => {
@@ -98,15 +100,15 @@ fn services(cfg: &Config) {
                 profile,
                 crate::sys::exists("/sys/firmware/acpi/platform_profile"),
             ));
-            quiet("arch-chroot", &[MNT, "systemctl", "enable", "power-profiles-daemon.service"]);
+            chroot(&["systemctl", "enable", "power-profiles-daemon.service"]);
         }
-        Power::Tlp => quiet("arch-chroot", &[MNT, "systemctl", "enable", "tlp.service"]),
+        Power::Tlp => chroot(&["systemctl", "enable", "tlp.service"]),
         Power::Off => {}
     }
     // the mirrorlist came from the ISO; keep it fresh when reflector is installed
     if cfg.packages.contains(&"reflector") {
         write_file("/etc/xdg/reflector/reflector.conf", &crate::sys::reflector_conf());
-        quiet("arch-chroot", &[MNT, "systemctl", "enable", "reflector.timer"]);
+        chroot(&["systemctl", "enable", "reflector.timer"]);
     }
 }
 

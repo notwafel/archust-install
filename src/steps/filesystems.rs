@@ -17,6 +17,8 @@ pub fn format(cfg: &Config, devices: &[String]) -> Formatted {
     // an existing ESP chosen for formatting is erased only now, after the final confirmation
     if cfg.format_esp {
         let esp = cfg.esp_part.as_deref().unwrap_or_else(|| die("no ESP to format"));
+        // mkfs.fat happily overwrites a mounted ESP; stop instead of pulling the rug out
+        crate::disk::clear_busy(esp);
         sh("mkfs.fat", &["-F32", "-n", "ESP", esp]);
     }
     let mut esp = cfg.esp_part.clone().unwrap_or_default();

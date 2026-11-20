@@ -12,6 +12,8 @@ use crate::ui::say;
 
 pub fn install(cfg: &Config) {
     cleanup::run(cfg);
+    // anything mounted or held by an open mapper on the install disk would survive mklabel
+    disk::clear_busy(&cfg.disk);
     say("Partitioning");
     let devices = disk::create(&cfg.disk, &cfg.parts, cfg.dual, cfg.fs.key());
     // the device paths only exist now; guessing them from the plan put resume= on the root

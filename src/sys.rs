@@ -63,6 +63,15 @@ pub fn require_live_iso() {
     if out("id", &["-u"]).as_deref() != Some("0\n") {
         die("run as root");
     }
+    // the whole pipeline is x86_64-only: grub x86_64-efi, GPT, no BIOS path
+    if out("uname", &["-m"]).as_deref() != Some("x86_64\n") {
+        die("this installer is x86_64 only");
+    }
+    // the plan always creates a GPT with an ESP and installs GRUB for x86_64-efi; booted in
+    // legacy BIOS mode grub-install fails only after the disk has been wiped
+    if !exists("/sys/firmware/efi") {
+        die("boot the ISO in UEFI mode (legacy BIOS boot cannot finish this install)");
+    }
 }
 
 pub const REFLECT_COUNTRIES: &str =
@@ -114,8 +123,7 @@ pub fn prepare_mirrors() {
     }
     run("pacman-key", &["--init"]);
     run("pacman-key", &["--populate", "archlinux"]);
-    // database refresh only; no `-S` with a named package (partial upgrade of the live system)
-    run("pacman", &["-Sy", "--noconfirm"]);
+    // reflector first: the ISO's own mirrorlist can be stale enough that `pacman -Sy` fails
     let args = reflector_args();
     let refs: Vec<&str> = args.iter().map(String::as_str).collect();
     run("reflector", &refs);
@@ -127,6 +135,8 @@ pub fn prepare_mirrors() {
     if n == 0 {
         die("reflector wrote no HTTPS mirrors");
     }
+    // database refresh only; no `-S` with a named package (partial upgrade of the live system)
+    run("pacman", &["-Sy", "--noconfirm"]);
 }
 
 /// Resolves every target package before the disk is touched. `-Sp` only prints URLs and
@@ -135,7 +145,9 @@ pub fn check_packages(packages: &[&str], multilib: bool) {
     if multilib {
         crate::steps::pacstrap::enable_multilib();
     }
-    let mut args = vec!["-Sp", "--needed", "--noconfirm"];
+    // no --needed: it would skip packages already installed live, and those still have to
+    // resolve in the repos for pacstrap inside the empty target
+    let mut args = vec!["-Sp", "--noconfirm"];
     args.extend_from_slice(packages);
     if out("pacman", &args).is_none() {
         die(&format!("not in the repos: {}", packages.join(" ")));

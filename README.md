@@ -77,7 +77,7 @@ re-asked; a wrong typed wipe confirmation aborts.
 
 | step | section | what | default |
 |---|---|---|---|
-| 1 | Disk | select a whole disk, shown with size, model, partition count and `in use`; the live ISO boot disk is excluded; other disks can be erased first with optional zero overwrite, ext4/btrfs/xfs/exFAT/FAT32 and LUKS2 | first listed disk; no extra disks |
+| 1 | Disk | select a whole disk, shown with size, model, partition count, `empty`, `whole-disk <fstype>` or `in use`; the live ISO boot disk is excluded; other disks can be erased first with optional zero overwrite, ext4/btrfs/xfs/exFAT/FAT32 and LUKS2 | first listed disk; no extra disks |
 | 2 | Partitioning | reuse an existing ESP and install after the last partition, or wipe; a non-FAT ESP offers formatting; a full wipe can overwrite the disk with zeros | keep existing partitions when present; zero off |
 | 3 | Sizes | swap GiB, root GiB (`0` = remaining usable space), EFI size for a wipe | `4`, `0`, `1024` MiB |
 | 4 | Filesystem and encryption | btrfs / ext4 / xfs, optional LUKS, then show the plan | btrfs, LUKS off |
@@ -97,20 +97,16 @@ LUKS2 are separate options per disk; one data-disk passphrase covers all encrypt
 wipe of the install disk can also zero it first. All erasing happens after `Start the
 installation?` and before the install disk is partitioned.
 
-Other disks can be erased in the same run: each selected disk needs its exact path typed back,
-then gets one GPT partition with ext4, btrfs, xfs, exFAT, FAT32 or no filesystem. Zero overwrite and
-LUKS2 are separate options per disk; one data-disk passphrase covers all encrypted extras. A full
-wipe of the install disk can also zero it first. All erasing happens after `Start the
-installation?` and before the install disk is partitioned.
-
 Hibernation is offered only when swap is at least RAM and at least 1 GiB. The prompt defaults to
 yes, so Enter adds the `resume` hook and `resume=UUID=`. After the last answer, the installer
 prints the selected packages and asks `Start the installation?`; its default is no.
 
-Wiping cannot be accepted with Enter: type the disk path exactly. The disk menu shows size, model
-and partition count, and marks a disk `in use` when any partition is mounted or swapped on. Before
+Wiping cannot be accepted with Enter: type the disk path exactly. That includes a disk with no
+partition table but a whole-disk filesystem or LUKS signature. The disk menu shows size, model and
+partition count, and marks a disk `in use` when any partition is mounted or swapped on. Before
 `parted mklabel`, active swap on that disk is switched off; a mounted partition or an open LUKS
-mapper aborts the run with the `cryptsetup close` command to run.
+mapper aborts the run with the `cryptsetup close` command to run. A legacy-BIOS boot is refused
+before any prompt: the install always ends with an x86_64 EFI GRUB.
 
 ![Safeguards: typed confirmation, mounted source check, live ISO boot disk excluded, ESP verified, multilib read back, firmware names checked](assets/safeguards-dark.svg#gh-dark-mode-only)
 ![Safeguards: typed confirmation, mounted source check, live ISO boot disk excluded, ESP verified, multilib read back, firmware names checked](assets/safeguards-light.svg#gh-light-mode-only)

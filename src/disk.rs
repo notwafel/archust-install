@@ -12,11 +12,16 @@ fn boot_disk() -> Option<String> {
             return Some(pk);
         }
         let row = out("lsblk", &["-dno", "TYPE,NAME", dev]).unwrap_or_default();
-        if let Some(name) = row.strip_prefix("disk").and_then(first_word) {
-            return Some(name);
+        // -d prints one row; a dd'd ISO is `disk sdb`, never a `loop`/`rom` device
+        if let Some(name) = row.split_whitespace().nth(1)
+            && row.split_whitespace().next() == Some("disk")
+        {
+            return Some(name.to_string());
         }
     }
-    None
+    // a remastered ISO can mount the boot medium elsewhere; the mount source still names it
+    let src = out("findmnt", &["-no", "SOURCE", "/run/archiso/bootmnt"])?;
+    out("lsblk", &["-no", "PKNAME", src.trim()]).and_then(|s| first_word(&s))
 }
 
 fn first_word(s: &str) -> Option<String> {
@@ -201,9 +206,19 @@ pub fn menu(names: &[String]) -> Vec<String> {
             let listing = listing(&dev);
             // a LUKS mapper is a `crypt` child, not another partition
             let parts = partition_count(&listing);
+            let fstype = rows(&listing)
+                .iter()
+                .find(|row| row.kind == "disk")
+                .map(|row| row.fstype.clone())
+                .unwrap_or_default();
             let in_use = rows(&listing).iter().any(|row| !row.mounts.is_empty());
             let state = if parts == 0 {
-                "empty".to_string()
+                if fstype.is_empty() {
+                    "empty".to_string()
+                } else {
+                    // no partition table, but the whole disk holds a filesystem or LUKS
+                    format!("whole-disk {}", fstype)
+                }
             } else if !in_use {
                 format!("{} partition{}", parts, if parts == 1 { "" } else { "s" })
             } else {

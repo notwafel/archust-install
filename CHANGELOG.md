@@ -3,7 +3,43 @@
 All notable changes to Archust Install. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.4.1] - 2026-11-20
+
+### Fixed
+
+- **`[multilib]` uncommenting no longer activates later repos.** The parser ran past every
+  commented section header, so a custom ISO with `#[custom]` and `Server = file:///home/custompkgs`
+  ended up enabled and `pacman -Sy` failed on the missing `custom.db`. The block now ends at the
+  next header of any kind and only `Key = value` directives lose their `#`.
+- **reflector runs before the database refresh.** A stale mirrorlist shipped on the ISO could make
+  `pacman -Sy` fail before the mirrors were replaced.
+- **A legacy-BIOS boot is refused up front.** The install always ends with
+  `grub-install --target=x86_64-efi`, which used to fail only after the disk was wiped. The check
+  also requires `x86_64`.
+- **A disk with a whole-disk filesystem or LUKS signature needs a typed confirmation.** It has no
+  partition table, so it looked empty; the disk menu now prints `whole-disk <fstype>`.
+- **The reused ESP is checked for mounts before `mkfs.fat`.** Formatting a mounted ESP pulled the
+  filesystem out from under the running system.
+- **An open `/dev/mapper/data` or `/dev/mapper/root` stops the run** with the exact
+  `cryptsetup close` command instead of formatting over the mapper.
+- **`systemctl enable` for Bluetooth, CUPS, UFW, power management and reflector is fatal on
+  failure.** It was ignored, so a chosen service could silently stay disabled.
+- **`hwclock --systohc` no longer aborts the install** on machines without an RTC.
+- **Size prompts reject values above 1,000,000**, which overflowed `GiB * 1024`.
+- **Half-typed comments in `pacman.conf` are left alone**: only `Key = value` lines are
+  uncommented, so `#Include extra repos` stays a comment.
+- **`pacman -Sp` no longer uses `--needed`.** Packages already present on the live system were
+  skipped instead of being verified for the empty target.
+- **Hybrid laptops with an AMD discrete GPU now get the Intel iGPU drivers too**: companion
+  packages are added whenever the detected second GPU differs from the chosen one.
+- **`wipefs -a` runs on a fresh data partition** so old exFAT/FAT labels and UUIDs do not leak into
+  the new filesystem.
+- **The live-ISO disk is always excluded from the picker**, including a remastered ISO whose boot
+  medium is mounted elsewhere: a `findmnt` fallback resolves it, and only a real `disk` row is
+  accepted, never a `loop` or `rom` device.
+- **The install disk is checked for mounts and open mappers right before partitioning**, so a
+  kept ESP or an old root that is still mounted aborts instead of being wiped under the running
+  system.
 
 ## [0.4.0] - 2026-11-15
 

@@ -1,7 +1,7 @@
 //! Step 2: optional LUKS2 on root. Also used by GRUB for the kernel command line.
 
 use crate::sys::with_stdin;
-use crate::ui::say;
+use crate::ui::{die, say};
 
 pub const MAPPER: &str = "root";
 
@@ -18,6 +18,10 @@ const ARGS: [&str; 12] = [
 
 /// Formats and opens `dev` under `mapper`; returns the mapper device path.
 pub fn encrypt(dev: &str, pass: &str, mapper: &str) -> String {
+    // a failed earlier run can leave the mapper open; check before the header is overwritten
+    if crate::sys::exists(&format!("/dev/mapper/{}", mapper)) {
+        die(&format!("close /dev/mapper/{} first: cryptsetup close {}", mapper, mapper));
+    }
     say("LUKS2: aes-xts-plain64, 512-bit key, argon2id");
     let mut format_args = vec!["luksFormat"];
     format_args.extend_from_slice(&ARGS);

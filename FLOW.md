@@ -42,7 +42,12 @@ The normal install path checks:
 ```text
 /run/archiso exists
 id -u == 0
+uname -m == x86_64
+/sys/firmware/efi exists
 ```
+
+A legacy-BIOS boot is refused up front: the plan always builds a GPT with an ESP and ends with
+`grub-install --target=x86_64-efi`, which would fail only after the disk was wiped.
 
 Then mirror preparation starts before disk selection.
 
@@ -60,14 +65,17 @@ The remount failure is a warning, not fatal.
 ```sh
 pacman-key --init
 pacman-key --populate archlinux
-pacman -Sy --noconfirm
 reflector \
   --country <trusted-country-list> \
   --protocol https \
   --latest 10 \
   --sort rate \
   --save /etc/pacman.d/mirrorlist
+pacman -Sy --noconfirm
 ```
+
+`reflector` runs before the database refresh: the ISO's shipped mirrorlist can be stale enough
+that `pacman -Sy` fails on it.
 
 The official ISO already ships `reflector`, `mkfs.fat`, `btrfs` and `cryptsetup`; the installer
 checks that the binaries exist and refuses to install any of them by name. A named `pacman -S`
@@ -86,12 +94,13 @@ this section except the cowspace remount are fatal on failure.
 The complete target package list is resolved after the prompts, before the disk is touched:
 
 ```sh
-pacman -Sp --needed --noconfirm <base-packages> <chosen-packages>
+pacman -Sp --noconfirm <base-packages> <chosen-packages>
 ```
 
 With multilib selected, `[multilib]` is uncommented in the live `/etc/pacman.conf` and the database
 is refreshed first. `-Sp` only prints URLs; a missing or renamed package aborts before
-`parted mklabel`.
+`parted mklabel`. There is no `--needed`: packages already installed on the live system still have
+to resolve in the repos for the empty target.
 
 ## 2. Prompt flow
 
@@ -102,6 +111,7 @@ is refreshed first. `-Sp` only prints URLs; a missing or renamed package aborts 
      lsblk -no PKNAME /run/archiso/bootmnt
      lsblk -no PKNAME /dev/disk/by-label/ARCH       # fallback
      lsblk -dno TYPE,NAME /dev/disk/by-label/ARCH   # fallback for a dd'd ISO
+     findmnt -no SOURCE /run/archiso/bootmnt | xargs lsblk -no PKNAME   # remastered ISO
      ```
 
    - List choices and inspect selected disk:
@@ -113,7 +123,9 @@ is refreshed first. `-Sp` only prints URLs; a missing or renamed package aborts 
      blockdev --getsize64 <disk>
      ```
 
-   - The boot disk name returned by `lsblk` is excluded from choices.
+   - The boot disk name returned by `lsblk` is excluded from choices, including the extra-disk
+     menu. A disk with no partition table is shown as `whole-disk <fstype>` when the raw device
+     carries a filesystem or LUKS signature, so "empty" never hides an old system.
    - `blockdev --getsize64 <disk>` supplies the size used by the partition plan. Disk choices
      use bare names from `lsblk`, so the prompt adds `/dev/` exactly once.
    - After the install disk is picked, a multi-select offers every other disk for erasing. Each
@@ -144,6 +156,9 @@ is refreshed first. `-Sp` only prints URLs; a missing or renamed package aborts 
    - Wipe requires the exact disk path typed back. EFI size must be at least 300 MiB. A separate
      default-no question offers to overwrite the whole install disk with zeros before
      partitioning.
+   - A disk with no partition table but a whole-disk filesystem or LUKS signature (`blkid -s TYPE
+     -o value <disk>`) prints that signature and needs the same typed confirmation; "empty" alone
+     never authorizes a wipe.
 
 3. **Sizes**
    - Swap default: 4 GiB.
@@ -210,6 +225,7 @@ parted -s <extra-disk> mklabel gpt
 parted -s <extra-disk> mkpart data 1MiB 100%
 partprobe <extra-disk>
 udevadm settle
+wipefs -a <extra-partition>                                            # old fs labels and UUIDs
 cryptsetup luksFormat --type luks2 ... --key-file - <extra-partition>  # optional
 cryptsetup open <extra-partition> data                                  # optional
 mkfs.ext4 -F -L data <target>       # or btrfs, xfs, exFAT, FAT32
@@ -219,6 +235,9 @@ cryptsetup close data               # optional
 Extra disks are erased first; a failure there stops the run before the install disk changes.
 `mkfs.exfat` must exist on the live ISO, otherwise the run stops before zeroing that disk. LUKS2
 on an extra disk is not auto-unlocked; open it with `cryptsetup open` and mount the mapper.
+`/dev/mapper/data` or `/dev/mapper/root` left open by an earlier failed run is never closed
+automatically: the run stops and prints the `cryptsetup close` command, because formatting over an
+open mapper destroys the wrong device.
 
 `dd` overwrites logical sectors only. On an SSD with wear levelling, old NAND cells can survive;
 the drive's secure-erase command is the physical option. This is marked with a `shortcut:` comment
@@ -268,6 +287,7 @@ as:
 For every planned partition:
 
 ```sh
+lsblk -lpno NAME,TYPE,FSTYPE,MOUNTPOINTS -P <efi-device>   # formatted ESP must not be mounted
 mkfs.fat -F32 -n ESP <efi-device>    # new EFI, or an existing ESP chosen for formatting
 mkswap -L swap <swap-device>
 swapon <swap-device>
@@ -369,7 +389,7 @@ Commands run inside `/mnt`:
 
 ```sh
 arch-chroot /mnt ln -sf /usr/share/zoneinfo/<timezone> /etc/localtime
-arch-chroot /mnt hwclock --systohc
+arch-chroot /mnt hwclock --systohc                          # quiet(), warnings ignored
 arch-chroot /mnt locale-gen
 arch-chroot /mnt sysctl --system
 arch-chroot /mnt mkinitcpio -P
@@ -383,7 +403,7 @@ arch-chroot /mnt systemctl enable power-profiles-daemon.service  # profiles only
 arch-chroot /mnt systemctl enable tlp.service              # tlp only
 ```
 
-The optional service enables go through `quiet(...)`; failure is ignored. `state.ini` contains
+Every `systemctl enable` above is fatal on failure: a silently disabled service looks like a working install. `state.ini` contains
 `[State]` and `Profile=<balanced|power-saver|performance>` so the chosen plan is active on first
 boot; when the live hardware exposes `/sys/firmware/acpi/platform_profile`, it also stores
 `PlatformDriver=platform_profile` so power-profiles-daemon does not reject the saved profile.
@@ -409,8 +429,6 @@ When the optional reflector group is selected:
 ```sh
 arch-chroot /mnt systemctl enable reflector.timer
 ```
-
-This command is run through `quiet(...)`; failure is ignored.
 
 ## 7. Completion and cleanup
 

@@ -162,9 +162,7 @@ pub fn ask_everything() -> Config {
     packages.push(kernel_headers(kernel));
     packages.extend(gpu.packages());
     // hybrid laptop: without this the integrated GPU gets no Vulkan/VA driver at all
-    if matches!(gpu, detect::Gpu::Nvidia | detect::Gpu::NvidiaOpen | detect::Gpu::Nouveau)
-        && let Some(igpu) = detect::companion()
-    {
+    if let Some(igpu) = detect::companion() && igpu != gpu {
         packages.extend(igpu.packages());
     }
     if let Some(ucode) = cpu.ucode() {
@@ -276,6 +274,15 @@ fn ask_layout(disk: &str, total_mib: u64) -> Layout {
             }
         } else {
             say(&format!("{} is empty", disk));
+            // no partition table is not the same as no data: a whole-disk filesystem or LUKS
+            // container has no partitions either
+            let fs = disk::fs_type(disk);
+            if !fs.is_empty() {
+                warn(&format!("{} has no partition table but carries a {} signature", disk, fs));
+                if ask(&format!("Type {} to confirm wiping it", disk)) != disk {
+                    die("aborted");
+                }
+            }
             let zero_install = ask_zero(disk);
             let mut keep = wipe_esp();
             keep.zero_install = zero_install;

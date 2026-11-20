@@ -30,7 +30,13 @@ fn clean(extra: &ExtraDisk, pass: &str) {
         return;
     }
     let part = partition(&extra.dev);
+    // stale exFAT/FAT labels survive mkfs on the same device node; wipe every signature first
+    sh("wipefs", &["-a", &part]);
     let target = if extra.luks {
+        // one shared mapper name; a failed earlier run can leave it open
+        if exists(&format!("/dev/mapper/{}", MAPPER)) {
+            die(&format!("close /dev/mapper/{} from the earlier run: cryptsetup close {}", MAPPER, MAPPER));
+        }
         luks::encrypt(&part, pass, MAPPER)
     } else {
         part

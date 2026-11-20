@@ -60,8 +60,21 @@ pub fn ask_name(name: &str) -> String {
     .to_string()
 }
 
+/// Bounded so `GiB * 1024` in the size questions cannot overflow.
 pub fn ask_num(name: &str, default: u64) -> u64 {
-    finish(Input::<u64>::new().with_prompt(name).default(default).interact_text())
+    finish(
+        Input::<u64>::new()
+            .with_prompt(name)
+            .default(default)
+            .validate_with(|n: &u64| -> Result<(), &str> {
+                if *n > 1_000_000 {
+                    Err("too large")
+                } else {
+                    Ok(())
+                }
+            })
+            .interact_text(),
+    )
 }
 
 pub fn ask_yes(name: &str, default_yes: bool) -> bool {
