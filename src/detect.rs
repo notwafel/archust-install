@@ -8,12 +8,12 @@ const CHOICES: [crate::detect::Gpu; 5] = [
     Gpu::Intel, Gpu::Amd, Gpu::Nvidia, Gpu::Nouveau, Gpu::Virt,
 ];
 
-// the proprietary kernel module is no longer packaged for Turing+; `nvidia-open-dkms` is the
-// only module that builds against the chosen kernel, and `nvidia-utils` still comes with it
+// the module package is resolved at install time: `nvidia-dkms` when the repo has it, otherwise
+// the open module
 const LABELS: [&str; 5] = [
     "Intel",
     "AMD",
-    "NVIDIA (nvidia-open-dkms, Turing+)",
+    "NVIDIA (proprietary module, open module fallback)",
     "NVIDIA legacy (nouveau)",
     "VM / no dedicated GPU",
 ];
@@ -90,13 +90,26 @@ impl Gpu {
             Gpu::Intel => &["vulkan-intel", "intel-media-driver"],
             // libva-mesa-driver was merged into mesa; nothing to add for VA-API here
             Gpu::Amd => &["vulkan-radeon"],
-            Gpu::Nvidia => &["nvidia-open-dkms", "nvidia-utils", "libva-nvidia-driver"],
+            Gpu::Nvidia => nvidia_packages(),
             Gpu::Nouveau | Gpu::Virt => &[],
         }
     }
 
     pub fn nvidia(self) -> bool {
         matches!(self, Gpu::Nvidia)
+    }
+}
+
+static NVIDIA_PROPRIETARY: [&str; 3] = ["nvidia-dkms", "nvidia-utils", "libva-nvidia-driver"];
+static NVIDIA_OPEN: [&str; 3] = ["nvidia-open-dkms", "nvidia-utils", "libva-nvidia-driver"];
+
+/// The proprietary module is the better one while the repos package it; a current repo only
+/// ships `nvidia-open-dkms`, and naming the missing package would abort the whole install.
+fn nvidia_packages() -> &'static [&'static str] {
+    if out("pacman", &["-Si", "nvidia-dkms"]).is_some() {
+        &NVIDIA_PROPRIETARY
+    } else {
+        &NVIDIA_OPEN
     }
 }
 

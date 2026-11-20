@@ -160,7 +160,8 @@ Always:
 Selected GPU:
   Intel: vulkan-intel intel-media-driver
   AMD: vulkan-radeon (VA-API comes from mesa)
-  NVIDIA: nvidia-open-dkms, nvidia-utils, libva-nvidia-driver
+  NVIDIA: nvidia-dkms when the repos still package it, else nvidia-open-dkms;
+          plus nvidia-utils and libva-nvidia-driver
   nouveau / VM: no additional GPU packages
 
   Hybrid with NVIDIA (Intel or AMD integrated GPU also present):
@@ -199,8 +200,10 @@ OpenGL, Vulkan and video-acceleration tooling. `Firmware` adds `linux-firmware-i
 gets no firmware group at all.
 
 The selected kernel's headers are installed with it: `linux-headers`, `linux-lts-headers` or
-`linux-zen-headers`. That is what `nvidia-open-dkms` builds against, so NVIDIA
-on `linux-lts` or `linux-zen` works without adding headers by hand.
+`linux-zen-headers`. That is what `nvidia-dkms` and `nvidia-open-dkms` build against, so NVIDIA
+on `linux-lts` or `linux-zen` works without adding headers by hand. The installer probes
+`pacman -Si nvidia-dkms` and picks the proprietary module when it exists, the open module
+otherwise.
 
 CPU microcode is its own prompt and is independent of the GPU: an AMD CPU with an NVIDIA card
 gets `amd-ucode` plus the NVIDIA packages, an Intel CPU with an AMD card gets `intel-ucode` plus
