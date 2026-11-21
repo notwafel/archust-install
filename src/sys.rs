@@ -72,6 +72,16 @@ pub fn require_live_iso() {
     if !exists("/sys/firmware/efi") {
         die("boot the ISO in UEFI mode (legacy BIOS boot cannot finish this install)");
     }
+    // a live system upgraded in place keeps the old kernel running but replaces /usr/lib/modules,
+    // so no module (vfat for the ESP, the filesystem drivers) can load later in the install
+    let release = out("uname", &["-r"]).unwrap_or_default();
+    let release = release.trim();
+    if !exists(&format!("/usr/lib/modules/{}", release)) {
+        die(&format!(
+            "/usr/lib/modules/{} is missing: this live system was upgraded in place - reboot the ISO",
+            release
+        ));
+    }
 }
 
 pub const REFLECT_COUNTRIES: &str =
@@ -189,9 +199,15 @@ pub fn grow_cowspace() {
     }
 }
 
-/// Loads a kernel module; false when it is not available for the running kernel.
+/// Loads a kernel module; false when it is not available for the running kernel. Only stdout is
+/// dropped: modprobe's own stderr names the missing module directory, and the caller's message
+/// alone cannot tell a partially upgraded live system from a broken ISO.
 pub fn modprobe(module: &str) -> bool {
-    quiet_ok("modprobe", &[module])
+    std::process::Command::new("modprobe")
+        .arg(module)
+        .stdout(Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success())
 }
 
 fn quiet_ok(program: &str, args: &[&str]) -> bool {

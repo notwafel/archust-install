@@ -52,21 +52,24 @@ pub fn mount(cfg: &Config, fs: &Formatted, root: &str) {
     // format first: a mount of the ESP below would sit on the live /mnt and be hidden by the
     // new root mounted over it, leaving /boot empty on the installed system
     cfg.fs.mkfs(root);
+    // -t keeps mount from probing every type; the probe noise ("EXT4-fs: Can't find ext4
+    // filesystem") reads like a real failure in the log
+    let kind = cfg.fs.key();
     match cfg.fs {
         Fs::Btrfs => {
-            sh("mount", &[root, MNT]);
+            sh("mount", &["-t", kind, root, MNT]);
             for name in fs::SUBVOLS {
                 sh("btrfs", &["subvolume", "create", &format!("{}/{}", MNT, name)]);
             }
             sh("umount", &[MNT]);
-            sh("mount", &["-o", &format!("subvol=@,{}", opts), root, MNT]);
+            sh("mount", &["-t", kind, "-o", &format!("subvol=@,{}", opts), root, MNT]);
             for (name, path) in fs::SUBVOLS.iter().zip(fs::SUBVOL_TARGETS.iter()).skip(1) {
                 let target = format!("{}{}", MNT, path);
                 stdfs::create_dir_all(&target).ok();
-                sh("mount", &["-o", &format!("subvol={},{}", name, opts), root, &target]);
+                sh("mount", &["-t", kind, "-o", &format!("subvol={},{}", name, opts), root, &target]);
             }
         }
-        _ => sh("mount", &["-o", opts, root, MNT]),
+        _ => sh("mount", &["-t", kind, "-o", opts, root, MNT]),
     }
     // grub-mkconfig probes /boot; without this it may see the live ISO's own fstab entries
     stdfs::create_dir_all(format!("{}/boot", MNT)).ok();

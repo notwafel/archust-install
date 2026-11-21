@@ -44,10 +44,13 @@ The normal install path checks:
 id -u == 0
 uname -m == x86_64
 /sys/firmware/efi exists
+/usr/lib/modules/$(uname -r) exists
 ```
 
 A legacy-BIOS boot is refused up front: the plan always builds a GPT with an ESP and ends with
-`grub-install --target=x86_64-efi`, which would fail only after the disk was wiped.
+`grub-install --target=x86_64-efi`, which would fail only after the disk was wiped. A live system
+upgraded in place (`pacman -Syu` on the ISO) is refused too: the running kernel no longer has a
+module directory, so `vfat` and the filesystem drivers cannot load.
 
 Then mirror preparation starts before disk selection.
 
@@ -314,13 +317,13 @@ Root format and mount:
 ```sh
 mkfs.ext4 -F -L archust <root>                      # ext4
 mkfs.xfs -f -L archust <root>                       # xfs
-mount -o noatime <root> /mnt                         # ext4 or xfs
+mount -t ext4 -o noatime <root> /mnt                 # ext4 or xfs, with -t xfs
 mkfs.btrfs -f -L archust <root>                     # btrfs
-mount <root> /mnt                                    # btrfs: temporary top-level mount
+mount -t btrfs <root> /mnt                           # btrfs: temporary top-level mount
 btrfs subvolume create /mnt/@                         # btrfs, then @home @log @pkg @snapshots
 umount /mnt                                           # btrfs
-mount -o subvol=@,noatime,compress=zstd:1 <root> /mnt # btrfs
-modprobe vfat                                         # fatal if the running kernel has no vfat
+mount -t btrfs -o subvol=@,noatime,compress=zstd:1 <root> /mnt # btrfs
+modprobe vfat                                         # fatal if the running kernel has no vfat; stderr is kept
 mount -t vfat <efi-device> /mnt/boot
 ```
 

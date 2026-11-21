@@ -3,6 +3,19 @@
 All notable changes to Archust Install. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [0.4.5] - 2026-11-21
+
+### Fixed
+
+- **A live ISO upgraded in place is refused before any prompt.** After `pacman -Syu` on the live
+  system the running kernel no longer has `/usr/lib/modules/<release>`, so `modprobe` fails for
+  every module and the ESP mount dies with `unknown filesystem type 'vfat'` after the disk has
+  already been zeroed. The guard now stops at startup and names the missing directory.
+- **`modprobe` keeps its stderr.** Its error was discarded, so a missing module reported only a
+  generic message instead of `module vfat not found in directory`.
+- **The root mount names its filesystem type.** A probe without `-t` printed `EXT4-fs (…): VFS:
+  Can't find ext4 filesystem` before the btrfs mount, which reads like a failure in the log.
+
 ## [0.4.4] - 2026-11-21
 
 ### Fixed
