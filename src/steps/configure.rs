@@ -2,8 +2,8 @@
 
 use crate::config::{Config, Power};
 use crate::steps::luks;
-use crate::sys::{MNT, chroot, quiet, with_stdin, write_file};
-use crate::ui::{die, say};
+use crate::sys::{MNT, chroot, chroot_log, quiet, with_stdin, write_file};
+use crate::ui::{die, say, warn};
 
 pub fn configure(cfg: &Config, root_dev: &str, raw_dev: &str, swap: &Option<(String, bool)>) {
     say("System configuration");
@@ -27,10 +27,10 @@ pub fn configure(cfg: &Config, root_dev: &str, raw_dev: &str, swap: &Option<(Str
     write_file("/etc/default/grub", &grub_default(cfg, &root_uuid, &crypt_uuid));
 
     let hibernate = matches!(swap, Some((_, true)));
-    if cfg.luks || hibernate {
-        // one HOOKS= only: a second drop-in would replace the first
-        write_file("/etc/mkinitcpio.conf.d/10-hooks.conf", &hooks_line(cfg, hibernate));
-    }
+    // always written, not only for LUKS or hibernation: the stock mkinitcpio.conf shipped with
+    // the target lists `microcode`, which aborts `mkinitcpio -P` when no microcode package was
+    // installed. One HOOKS= only: a second drop-in would replace the first.
+    write_file("/etc/mkinitcpio.conf.d/10-hooks.conf", &hooks_line(cfg, hibernate));
     if cfg.gpu.nvidia() {
         write_file("/etc/mkinitcpio.conf.d/10-nvidia.conf",
             "MODULES=(nvidia nvidia_modeset nvidia_uvm nvidia_drm)\n");
@@ -43,7 +43,16 @@ pub fn configure(cfg: &Config, root_dev: &str, raw_dev: &str, swap: &Option<(Str
     quiet("arch-chroot", &[MNT, "hwclock", "--systohc"]);
     chroot(&["locale-gen"]);
     chroot(&["sysctl", "--system"]);
-    chroot(&["mkinitcpio", "-P"]);
+    // a failed initramfs would still boot the live ISO; name the line that broke instead of a bare
+    // "failed", because the presets print several warnings that are not the cause
+    let (ok, log) = chroot_log(&["mkinitcpio", "-P"]);
+    let errors = crate::sys::mkinitcpio_errors(&log);
+    if !ok || !errors.is_empty() {
+        for line in errors {
+            warn(line);
+        }
+        die("mkinitcpio -P left an incomplete image, see the errors above");
+    }
     chroot(&["grub-install", "--target=x86_64-efi", "--efi-directory=/boot", "--bootloader-id=GRUB"]);
     chroot(&["grub-mkconfig", "-o", "/boot/grub/grub.cfg"]);
     // the boot menu may be wrong, but a missing EFI entry is the machine that does not boot

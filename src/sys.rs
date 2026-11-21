@@ -33,6 +33,32 @@ pub fn chroot(args: &[&str]) {
     run("arch-chroot", &all);
 }
 
+/// Same as `chroot`, but returns the combined output with the success flag. For steps whose
+/// generic "failed" message hides the hook or module that actually broke, such as `mkinitcpio -P`.
+pub fn chroot_log(args: &[&str]) -> (bool, String) {
+    let mut all = vec![MNT];
+    all.extend_from_slice(args);
+    match Command::new("arch-chroot").args(&all).output() {
+        Ok(o) => (
+            o.status.success(),
+            format!(
+                "{}{}",
+                String::from_utf8_lossy(&o.stdout),
+                String::from_utf8_lossy(&o.stderr)
+            ),
+        ),
+        Err(e) => (false, e.to_string()),
+    }
+}
+
+/// `mkinitcpio -P` exits 0 even when a preset reports "errors were encountered during the build",
+/// so the image is incomplete while the exit code looks fine.
+pub fn mkinitcpio_errors(log: &str) -> Vec<&str> {
+    log.lines()
+        .filter(|l| l.contains("ERROR") || l.contains("errors were encountered"))
+        .collect()
+}
+
 /// Writes `input` to the program's stdin (passwords never appear in `ps`).
 pub fn with_stdin(input: &str, program: &str, args: &[&str]) {
     use std::io::Write;
@@ -222,7 +248,7 @@ fn quiet_ok(program: &str, args: &[&str]) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{missing_package, reflector_args, reflector_conf};
+    use super::{missing_package, mkinitcpio_errors, reflector_args, reflector_conf};
 
     /// A missing package must not be confused with a mirror or database failure.
     #[test]
@@ -231,6 +257,17 @@ mod tests {
         assert!(!missing_package(
             "error: failed retrieving file 'core.db' from mirror.example: Could not resolve host\n"
         ));
+    }
+
+    /// A broken preset exits 0, so the exit code alone cannot tell a complete image from a
+    /// half-written one.
+    #[test]
+    fn incomplete_mkinitcpio_build_is_an_error() {
+        let log = "==> WARNING: no fsck helper found. fsck will not be run on boot\n\
+                   ==> ERROR: Hook 'microcode' cannot be found\n\
+                   errors were encountered during the build. The image may not be complete\n";
+        assert_eq!(mkinitcpio_errors(log).len(), 2);
+        assert!(mkinitcpio_errors("==> WARNING: no fsck helper found.\n").is_empty());
     }
 
     #[test]

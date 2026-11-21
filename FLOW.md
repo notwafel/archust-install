@@ -345,13 +345,16 @@ With multilib selected:
 pacman -Syy --noconfirm
 ```
 
-The installer uncomments `[multilib]` in the live `/etc/pacman.conf`, later copies it into the
-target, and verifies the target copy is not still commented.
+The installer uncomments `[multilib]` in the live `/etc/pacman.conf` so the live database can
+resolve `multilib` packages. After `pacstrap` it edits the **target's** `/etc/pacman.conf`, not a copy
+of the live one: manual edits made to the live file (such as `IgnorePkg` pinning the running kernel)
+must not follow into the installed system. A still-commented target file is fatal.
 
 Then:
 
 ```sh
 pacstrap -K /mnt <base-packages> <chosen-packages> <filesystem-package>
+/usr/bin/fsck.<root-type> exists in the target            # fatal otherwise
 genfstab -U /mnt
 ```
 
@@ -386,7 +389,9 @@ The installer writes, then runs:
 /mnt/var/lib/power-profiles-daemon/state.ini            # power profiles only
 ```
 
-LUKS or accepted hibernation adds `/mnt/etc/mkinitcpio.conf.d/10-hooks.conf`. Nvidia adds
+`/mnt/etc/mkinitcpio.conf.d/10-hooks.conf` is always written; `encrypt` and `resume` are added for
+LUKS and hibernation, and `microcode` only when a microcode package is installed, because the stock
+`HOOKS` lists it unconditionally and a missing package aborts the build. Nvidia adds
 `/mnt/etc/mkinitcpio.conf.d/10-nvidia.conf` and the `systemd-udevd` drop-in.
 
 Commands run inside `/mnt`:
@@ -396,7 +401,7 @@ arch-chroot /mnt ln -sf /usr/share/zoneinfo/<timezone> /etc/localtime
 arch-chroot /mnt hwclock --systohc                          # quiet(), warnings ignored
 arch-chroot /mnt locale-gen
 arch-chroot /mnt sysctl --system
-arch-chroot /mnt mkinitcpio -P
+arch-chroot /mnt mkinitcpio -P                              # output scanned: any ERROR line is fatal
 arch-chroot /mnt grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=GRUB
 arch-chroot /mnt grub-mkconfig -o /boot/grub/grub.cfg
 arch-chroot /mnt systemctl enable NetworkManager systemd-timesyncd fstrim.timer

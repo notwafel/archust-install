@@ -3,6 +3,22 @@
 All notable changes to Archust Install. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [0.4.9] - 2026-11-21
+
+### Fixed
+
+- **`mkinitcpio -P` reported "the image may not be complete" without saying why.** The build exits
+  0 for a broken preset, so the installer accepted an incomplete initramfs. Its output is now
+  captured, every `ERROR` line is printed, and the step fails.
+- **The `HOOKS` drop-in was only written for LUKS or hibernation.** A plain btrfs or ext4 install
+  kept the stock `HOOKS`, which lists `microcode`; with `None / other` selected no microcode
+  package exists and the initramfs build failed. The drop-in is now always written.
+- **A missing `fsck.<type>` helper is fatal right after `pacstrap`.** Before, the target silently
+  booted without checking its root filesystem.
+- **`[multilib]` no longer copies the live `/etc/pacman.conf` into the target.** The live file
+  carries hand-made edits such as `IgnorePkg = linux linux-firmware`, which would have pinned the
+  installed system's kernel forever. Only the target's own file is edited.
+
 ## [0.4.8] - 2026-11-21
 
 ### Fixed

@@ -39,14 +39,26 @@ pub fn base(cfg: &Config, swap: &Option<(String, bool)>) {
     }
     sh("pacstrap", &args);
 
+    // the target's fsck hook runs `fsck.<type>`; without the helper the root is never checked at
+    // boot, and mkinitcpio warns but exits 0. the missing package is named here instead
+    let fsck = format!("{}/usr/bin/fsck.{}", MNT, cfg.fs.key());
+    if !crate::sys::exists(&fsck) {
+        die(&format!("{} is missing from the target, its fsck hook would never run", fsck));
+    }
+
     if cfg.multilib {
-        let live = std::fs::read_to_string(LIVE_CONF).unwrap_or_else(|_| die("cannot read live pacman.conf"));
-        write_file("/etc/pacman.conf", &live);
-        // pacstrap -C or a failed copy would leave the target without [multilib]
-        let stuck = std::fs::read_to_string(format!("{}{}", MNT, LIVE_CONF)).unwrap_or_default();
-        if uncomment_multilib(&stuck) != stuck {
+        // the target's own file, not the live copy: the live one is edited by hand before the
+        // install (IgnorePkg for the running kernel) and those edits must not follow into the
+        // installed system
+        let target = format!("{}{}", MNT, LIVE_CONF);
+        let conf = std::fs::read_to_string(&target)
+            .unwrap_or_else(|_| die(&format!("cannot read {}", target)));
+        let enabled = uncomment_multilib(&conf);
+        if enabled == conf {
             die("multilib is not enabled in the target /etc/pacman.conf");
         }
+        std::fs::write(&target, enabled)
+            .unwrap_or_else(|_| die(&format!("cannot write {}", target)));
     }
 
     say("fstab");
