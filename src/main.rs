@@ -30,7 +30,7 @@ fn run() {
     sys::check_packages(&cfg.packages, cfg.multilib);
     ui::say(&format!("Packages ({}): {}", cfg.packages.len(), cfg.packages.join(" ")));
     if cfg.zero_install {
-        ui::say(&format!("{} will be overwritten with zeros before partitioning", cfg.disk));
+        ui::say(&format!("{} will be securely erased before partitioning", cfg.disk));
     }
     for extra in &cfg.extras {
         let fs = if extra.fs == config::ExtraFs::None {
@@ -41,7 +41,7 @@ fn run() {
         ui::say(&format!(
             "Extra disk {}: {}{}{}",
             extra.dev,
-            if extra.zero { "zeros, " } else { "" },
+            if extra.zero { "secure erase, " } else { "" },
             fs,
             if extra.luks { ", LUKS2" } else { "" }
         ));

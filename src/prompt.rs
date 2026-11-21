@@ -337,9 +337,9 @@ fn keep_existing(esp: String, free: u64, disk: &str, format_esp: bool) -> Keep {
     }
 }
 
-/// A full wipe can also overwrite every sector first; slow, so never the default.
+/// A full wipe can also destroy the old data first; slow and irreversible, so never the default.
 fn ask_zero(disk: &str) -> bool {
-    ask_yes(&format!("Overwrite {} with zeros before partitioning? (slow)", disk), false)
+    ask_yes(&format!("Secure erase {} before partitioning? (slow, cannot be undone)", disk), false)
 }
 
 /// A stale or unformatted ESP is still usable after a fresh FAT32 filesystem. Destroying it is
@@ -527,7 +527,7 @@ fn ask_extras(install: &str) -> Vec<ExtraDisk> {
     let checked = vec![false; others.len()];
     let mut extras = Vec::new();
     for dev in pick_many("Erase or format other disks", &others, &checked) {
-        let zero = ask_yes(&format!("Overwrite {} with zeros first? (slow)", dev), false);
+        let zero = ask_yes(&format!("Secure erase {} first? (slow, cannot be undone)", dev), false);
         let fs = pick(&format!("Filesystem on {}", dev), &EXTRA_FS, 0);
         if !zero && fs == ExtraFs::None {
             warn(&format!("nothing selected for {}, skipping", dev));
@@ -542,7 +542,7 @@ fn ask_extras(install: &str) -> Vec<ExtraDisk> {
         warn(&format!(
             "This erases ALL of {}: {}{}",
             dev,
-            if zero { "overwrite with zeros, then " } else { "" },
+            if zero { "secure erase, then " } else { "" },
             after
         ));
         if ask(&format!("Type {} to confirm", dev)) != dev {
@@ -556,7 +556,7 @@ fn ask_extras(install: &str) -> Vec<ExtraDisk> {
 fn show_plan(disk: &str, total_mib: u64, layout: &Layout, fs: Fs, luks: bool) {
     say(&format!("Plan on {} ({} GiB)", disk, total_mib / 1024));
     item("keep existing", if layout.dual { "yes" } else { "no, full wipe" });
-    item("zero overwrite", if layout.zero_install { "yes, install disk" } else { "no" });
+    item("secure erase", if layout.zero_install { "yes, install disk" } else { "no" });
     item("encryption", if luks { "LUKS2 on root" } else { "none" });
     item("filesystem", &fs.to_string());
     if let Some(e) = &layout.esp_part {

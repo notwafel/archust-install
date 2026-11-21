@@ -3,6 +3,29 @@
 All notable changes to Archust Install. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [0.6.0] - 2026-11-21
+
+### Changed
+
+- **The "zero overwrite" option is now a real secure erase, chosen per disk.** `dd if=/dev/zero`
+  never reached the flash cells a controller keeps in reserve, so a disk wiped that way could still
+  hand back old data. The installer now asks the drive itself, in this order:
+  - any NVMe disk: `nvme sanitize` with the strongest action `id-ctrl` reports (`--preq`, so a
+    success that does not purge user data is refused). When `sanicap` is absent the fallback is
+    `nvme format -s 2` (cryptographic erase), then `-s 1` (user data erase);
+  - anything else that answers `hdparm -I` - real SATA and USB-SATA bridges alike - gets ATA
+    SECURE ERASE, enhanced when the drive advertises it;
+  - only devices with neither command (SD cards, USB sticks, some bridges) are overwritten with
+    `dd`, and the run says so: that path is not a guarantee on flash media.
+- **The sanitize is polled to completion, not fired and forgotten.** `nvme sanitize` is
+  asynchronous; `nvme log sanitize` must report `0x0001`. `0x0003` (failed), a status that never
+  arrives within an hour, a refused erase password, a failed erase and a security-frozen ATA drive
+  all stop the run. A half-erased disk must never be reported as wiped.
+- **A failed ATA erase clears its password before stopping.** Otherwise the drive stays locked
+  behind `archust-erase`, which is worse than an erased disk: it is unusable.
+- **Prompts, summary and help say "secure erase" instead of "overwrite with zeros"**, because that
+  is now what happens.
+
 ## [0.5.0] - 2026-11-21
 
 Checked against the ArchWiki installation guide and `archinstall`.

@@ -161,7 +161,8 @@ pub fn prepare_mirrors() {
     fs::write(LIVE_CONF, reflector_conf()).unwrap_or_else(|e| die(&format!("cannot write {}: {}", LIVE_CONF, e)));
     // the official ISO already ships every helper; installing one by name from a newer repo
     // would mix it with the running live system and can pull a newer glibc/pacman into tmpfs
-    for tool in ["reflector", "mkfs.fat", "btrfs", "cryptsetup"] {
+    // nvme-cli and hdparm are what secure erase calls; both ship on the official ISO
+    for tool in ["reflector", "mkfs.fat", "btrfs", "cryptsetup", "nvme", "hdparm"] {
         if !exists(&format!("/usr/bin/{}", tool)) {
             die(&format!("/usr/bin/{} is missing from this ISO - use a current Arch ISO", tool));
         }
@@ -243,6 +244,12 @@ pub fn modprobe(module: &str) -> bool {
         .stdout(Stdio::null())
         .status()
         .is_ok_and(|s| s.success())
+}
+
+/// Runs a program silently; true when it exists and exits 0. For probes where a missing tool is
+/// an expected answer, not a failure.
+pub fn ok(program: &str, args: &[&str]) -> bool {
+    quiet_ok(program, args)
 }
 
 fn quiet_ok(program: &str, args: &[&str]) -> bool {

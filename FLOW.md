@@ -135,7 +135,7 @@ to resolve in the repos for the empty target.
      use bare names from `lsblk`, so the prompt adds `/dev/` exactly once.
    - After the install disk is picked, a multi-select offers every other disk for erasing. Each
      selected disk needs its exact path typed back, plus a filesystem (`ext4`, `btrfs`, `xfs`,
-     `exFAT`, `FAT32`, none), optional zero overwrite and optional LUKS2. One passphrase covers
+     `exFAT`, `FAT32`, none), optional secure erase and optional LUKS2. One passphrase covers
      all encrypted extra disks. Nothing is erased during the prompts.
 
 2. **Partitioning**
@@ -159,7 +159,7 @@ to resolve in the repos for the empty target.
      typed confirmation. `mkfs.fat -F32 -n ESP <efi-device>` runs in the filesystem step, after
      the final `Start the installation?` confirmation.
    - Wipe requires the exact disk path typed back. EFI size must be at least 300 MiB. A separate
-     default-no question offers to overwrite the whole install disk with zeros before
+     default-no question offers to securely erase the whole install disk before
      partitioning.
    - A disk with no partition table but a whole-disk filesystem or LUKS signature (`blkid -s TYPE
      -o value <disk>`) prints that signature and needs the same typed confirmation; "empty" alone
@@ -221,11 +221,22 @@ Start the installation? [default: no]
 ## 3. Partition creation
 
 Before the install disk is touched, the installer erases the extra disks chosen in step 1, then
-zeroes the install disk when that option was accepted:
+erases the install disk when that option was accepted. The erase asks the drive itself whenever the
+drive has a command for it:
 
 ```sh
 lsblk -lpno NAME,TYPE,FSTYPE,MOUNTPOINTS -P <disk>   # mounted or open mapper aborts
-dd if=/dev/zero of=<disk> bs=1M status=progress conv=fsync count=<size in MiB>  # only when zero was chosen
+lsblk -dno TRAN <disk>                               # nvme, or left to hdparm for ATA
+hdparm -I <disk>                                     # ATA security section decides secure erase
+nvme id-ctrl /dev/nvme0                             # sanicap bits
+nvme sanitize /dev/nvme0 -a 4|2|3 --preq             # crypto, block erase or overwrite action
+nvme log sanitize /dev/nvme0                         # polled until 0x0001; 0x0003 is fatal
+nvme format <disk> -s 2                              # only when sanicap reports none
+nvme format <disk> -s 1                              # when the crypto erase was refused
+hdparm --user-master u --security-set-pass archust-erase <disk>
+hdparm --user-master u --security-erase-enhanced|--security-erase archust-erase <disk>
+hdparm --user-master u --security-disable archust-erase <disk>   # only after a failed erase
+dd if=/dev/zero of=<disk> bs=1M status=progress conv=fsync count=<size in MiB>  # last resort only
 parted -s <extra-disk> mklabel gpt
 parted -s <extra-disk> mkpart data 1MiB 100%
 partprobe <extra-disk>
@@ -238,15 +249,25 @@ cryptsetup close data               # optional
 ```
 
 Extra disks are erased first; a failure there stops the run before the install disk changes.
-`mkfs.exfat` must exist on the live ISO, otherwise the run stops before zeroing that disk. LUKS2
+`mkfs.exfat` must exist on the live ISO, otherwise the run stops before erasing that disk. LUKS2
 on an extra disk is not auto-unlocked; open it with `cryptsetup open` and mount the mapper.
 `/dev/mapper/data` or `/dev/mapper/root` left open by an earlier failed run is never closed
 automatically: the run stops and prints the `cryptsetup close` command, because formatting over an
 open mapper destroys the wrong device.
 
+`erase_plan(transport, ata_security)` is the whole decision and is unit tested: `nvme` goes to
+sanitize, anything else that answered `hdparm -I` goes to ATA SECURE ERASE (USB-SATA bridges
+included), everything else is overwritten. `<disk>` is the whole disk, never `nvme0n1`'s namespace
+size: the command covers every namespace the controller owns.
+
+Failures are fatal, not warnings, because a half-erased disk sold as wiped is the harm here: a
+security-frozen ATA drive (only a power cycle clears it), a refused erase password, a failed erase
+(whose password is cleared first, or the disk stays locked), a sanitize that reports `0x0003`, and
+a sanitize still running after an hour.
+
 `dd` overwrites logical sectors only. On an SSD with wear levelling, old NAND cells can survive;
-the drive's secure-erase command is the physical option. This is marked with a `shortcut:` comment
-in `src/steps/cleanup.rs`.
+that path is only reached when the drive has no erase command at all (SD cards, USB sticks, some
+bridges), and it is warned about. It is marked with a `shortcut:` comment in `src/steps/cleanup.rs`.
 
 Full wipe first reads the partitions of the disk:
 
@@ -461,7 +482,8 @@ cryptsetup close root    # LUKS only
 - `src/prompt.rs`: questions, defaults, package selection and validation.
 - `src/disk.rs`: disk discovery, partition arithmetic inputs and destructive partitioning.
 - `src/steps/filesystems.rs`: formatting and mount order.
-- `src/steps/cleanup.rs`: extra-disk erase, zero overwrite, data partition and LUKS2.
+- `src/steps/cleanup.rs`: extra-disk erase, NVMe sanitize/format, ATA secure erase, overwrite
+  fallback, data partition and LUKS2.
 - `src/steps/luks.rs`: cryptsetup options.
 - `src/steps/pacstrap.rs`: multilib, pacstrap, fstab and resume configuration.
 - `src/steps/configure.rs`: target files, bootloader, users and services.
