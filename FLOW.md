@@ -425,8 +425,9 @@ arch-chroot /mnt hwclock --systohc                          # quiet(), warnings 
 arch-chroot /mnt locale-gen
 arch-chroot /mnt sysctl --system
 arch-chroot /mnt mkinitcpio -P                              # output scanned: any ERROR line is fatal
-arch-chroot /mnt grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=GRUB
+arch-chroot /mnt grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=GRUB --removable
 arch-chroot /mnt grub-mkconfig -o /boot/grub/grub.cfg
+/mnt/boot/EFI/BOOT/BOOTX64.EFI exists                       # fatal otherwise
 arch-chroot /mnt systemctl enable NetworkManager systemd-timesyncd fstrim.timer
 arch-chroot /mnt systemctl disable fstrim.timer                       # btrfs root only
 arch-chroot /mnt systemctl enable bluetooth.service        # Bluetooth only

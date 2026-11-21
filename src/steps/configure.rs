@@ -53,11 +53,18 @@ pub fn configure(cfg: &Config, root_dev: &str, raw_dev: &str, swap: &Option<(Str
         }
         die("mkinitcpio -P left an incomplete image, see the errors above");
     }
-    chroot(&["grub-install", "--target=x86_64-efi", "--efi-directory=/boot", "--bootloader-id=GRUB"]);
+    // --removable also writes the fallback path esp/EFI/BOOT/BOOTX64.EFI. Some firmware, MSI
+    // boards in particular (ArchWiki GRUB), only ever looks there and ignores the NVRAM entry that
+    // --bootloader-id creates, so the disk does not appear in the boot menu without it.
+    chroot(&[
+        "grub-install", "--target=x86_64-efi", "--efi-directory=/boot",
+        "--bootloader-id=GRUB", "--removable",
+    ]);
     chroot(&["grub-mkconfig", "-o", "/boot/grub/grub.cfg"]);
-    // the boot menu may be wrong, but a missing EFI entry is the machine that does not boot
-    if !crate::sys::exists(&format!("{}/boot/EFI/GRUB/grubx64.efi", crate::sys::MNT)) {
-        die("grub-install wrote nothing to the ESP, check /boot is really the EFI partition");
+    // the boot menu may be wrong, but a missing fallback binary is the machine that does not boot
+    let fallback = format!("{}/boot/EFI/BOOT/BOOTX64.EFI", crate::sys::MNT);
+    if !crate::sys::exists(&fallback) {
+        die(&format!("grub-install did not write {}, and the firmware may not list the disk", fallback));
     }
 
     users(cfg);

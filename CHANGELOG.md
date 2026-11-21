@@ -3,7 +3,15 @@
 All notable changes to Archust Install. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow [Semantic Versioning](https://semver.org/).
 
-## [0.6.0] - 2026-11-21
+## [0.7.0] - 2026-11-21
+
+### Fixed
+
+- **The installed disk did not show up in the UEFI boot menu on some boards.** `grub-install` now
+  passes `--removable`, exactly as `archinstall` does: GRUB is also written to
+  `esp/EFI/BOOT/BOOTX64.EFI`, the fallback path every firmware reads after its NVRAM entries are
+  gone. The ArchWiki GRUB article names MSI boards as the ones where this is mandatory. The
+  post-install check now looks for that file, not only for `EFI/GRUB/grubx64.efi`.
 
 ### Changed
 
