@@ -3,6 +3,15 @@
 All notable changes to Archust Install. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [0.4.7] - 2026-11-21
+
+### Fixed
+
+- **README uses a full upgrade with the kernel pinned.** `pacman -Sy --needed git rust` is a
+  partial upgrade: `glibc` and `openssl` must match the repos. The step is now
+  `pacman -Syu --needed --ignore linux,linux-firmware git rust`, with `IgnorePkg` in
+  `/etc/pacman.conf` as a second guard, so the running kernel keeps its modules and `vfat` loads.
+
 ## [0.4.6] - 2026-11-21
 
 ### Fixed
