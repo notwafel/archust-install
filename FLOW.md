@@ -52,7 +52,9 @@ A legacy-BIOS boot is refused up front: the plan always builds a GPT with an ESP
 upgraded in place (`pacman -Syu` on the ISO) is refused too: the running kernel no longer has a
 module directory, so `vfat` and the filesystem drivers cannot load.
 
-Then mirror preparation starts before disk selection.
+Then the live clock is checked (`timedatectl show --property=NTPSynchronized --value`); anything
+but `yes` is a warning, because a wrong clock breaks package signatures later but does not stop
+the run. Mirror preparation starts before disk selection.
 
 ### Cowspace
 
@@ -405,6 +407,7 @@ arch-chroot /mnt mkinitcpio -P                              # output scanned: an
 arch-chroot /mnt grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=GRUB
 arch-chroot /mnt grub-mkconfig -o /boot/grub/grub.cfg
 arch-chroot /mnt systemctl enable NetworkManager systemd-timesyncd fstrim.timer
+arch-chroot /mnt systemctl disable fstrim.timer                       # btrfs root only
 arch-chroot /mnt systemctl enable bluetooth.service        # Bluetooth only
 arch-chroot /mnt systemctl enable cups.service             # CUPS only
 arch-chroot /mnt systemctl enable ufw.service              # firewall only

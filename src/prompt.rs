@@ -23,9 +23,11 @@ const ZONES: [&str; 15] = [
 ];
 
 // `locales` is not an Arch package: glibc ships `locale-gen` and `/etc/locale.gen`, and the
-// configure step generates the chosen locale
-const BASE: [&str; 10] = [
-    "base", "base-devel", "linux-firmware", "dkms",
+// configure step generates the chosen locale. `mkinitcpio` is named explicitly, as archinstall
+// does: pacman otherwise takes whatever initramfs provider the host's pacman.conf prefers, and
+// the configure step runs `mkinitcpio -P` unconditionally.
+const BASE: [&str; 11] = [
+    "base", "base-devel", "mkinitcpio", "linux-firmware", "dkms",
     "grub", "efibootmgr", "dosfstools", "mtools", "networkmanager", "sudo",
 ];
 

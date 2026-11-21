@@ -24,6 +24,7 @@ fn main() {
 
 fn run() {
     sys::require_live_iso();
+    sys::warn_unsynced_clock();
     sys::prepare_mirrors();
     let cfg = prompt::ask_everything();
     sys::check_packages(&cfg.packages, cfg.multilib);

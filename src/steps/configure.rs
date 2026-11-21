@@ -27,9 +27,9 @@ pub fn configure(cfg: &Config, root_dev: &str, raw_dev: &str, swap: &Option<(Str
     write_file("/etc/default/grub", &grub_default(cfg, &root_uuid, &crypt_uuid));
 
     let hibernate = matches!(swap, Some((_, true)));
-    // always written, not only for LUKS or hibernation: the stock mkinitcpio.conf shipped with
-    // the target lists `microcode`, which aborts `mkinitcpio -P` when no microcode package was
-    // installed. One HOOKS= only: a second drop-in would replace the first.
+    // man mkinitcpio.conf(5): drop-ins beat the main file, so this HOOKS= replaces the stock one
+    // instead of adding to it. Always written: the stock list names `microcode`, which aborts the
+    // build when no microcode package is installed.
     write_file("/etc/mkinitcpio.conf.d/10-hooks.conf", &hooks_line(cfg, hibernate));
     if cfg.gpu.nvidia() {
         write_file("/etc/mkinitcpio.conf.d/10-nvidia.conf",
@@ -118,6 +118,11 @@ fn services(cfg: &Config) {
     if cfg.packages.contains(&"reflector") {
         write_file("/etc/xdg/reflector/reflector.conf", &crate::sys::reflector_conf());
         chroot(&["systemctl", "enable", "reflector.timer"]);
+    }
+    // a btrfs root is a CoW filesystem; fstrim.timer is only right for ext4 and xfs, and a
+    // weekly trim on btrfs costs more than it returns (archinstall disables it for btrfs too)
+    if cfg.fs.is_btrfs() {
+        crate::sys::quiet("arch-chroot", &[MNT, "systemctl", "disable", "fstrim.timer"]);
     }
 }
 

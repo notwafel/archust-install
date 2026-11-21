@@ -82,6 +82,15 @@ pub fn write_file(path: &str, body: &str) {
     fs::write(&full, body).unwrap_or_else(|_| die(&format!("cannot write {}", full)));
 }
 
+/// The live clock has to be right before anything is downloaded: a wrong clock fails package
+/// signature checks and TLS with messages that name neither. archinstall waits here too.
+pub fn warn_unsynced_clock() {
+    let synced = out("timedatectl", &["show", "--property=NTPSynchronized", "--value"]);
+    if synced.as_deref().map(str::trim) != Some("yes") {
+        warn("the clock is not NTP-synchronized yet; a wrong time breaks package signatures");
+    }
+}
+
 pub fn require_live_iso() {
     if !exists("/run/archiso") {
         die("run as root on the Arch live ISO");

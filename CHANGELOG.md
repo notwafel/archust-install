@@ -3,6 +3,20 @@
 All notable changes to Archust Install. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [0.5.0] - 2026-11-21
+
+Checked against the ArchWiki installation guide and `archinstall`.
+
+### Fixed
+
+- **`mkinitcpio` is named explicitly in the package list.** `archinstall` pins it for the same
+  reason: `pacman` otherwise takes whichever initramfs provider the host's `pacman.conf` prefers,
+  while the configure step runs `mkinitcpio -P` unconditionally.
+- **An unsynchronized live clock is reported before anything is downloaded.** A wrong clock fails
+  package signature checks and TLS with messages that name neither.
+- **`fstrim.timer` is disabled on a btrfs root.** Periodic TRIM on a CoW filesystem costs more than
+  it returns; `archinstall` disables it for btrfs as well.
+
 ## [0.4.9] - 2026-11-21
 
 ### Fixed
