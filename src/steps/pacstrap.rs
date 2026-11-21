@@ -27,14 +27,15 @@ pub fn base(cfg: &Config, swap: &Option<(String, bool)>) {
         // it is copied into /mnt right after pacstrap
         enable_multilib();
     }
-
     say("pacstrap");
     let mut args: Vec<&str> = vec!["-K", MNT];
     args.extend_from_slice(&cfg.packages);
     match cfg.fs {
         Fs::Xfs => args.push("xfsprogs"),
         Fs::Ext4 => args.push("e2fsprogs"),
-        Fs::Btrfs => {}
+        // without btrfs-progs the target has no fsck.btrfs for the fsck hook and no btrfs tool to
+        // repair a filesystem that will not mount
+        Fs::Btrfs => args.push("btrfs-progs"),
     }
     sh("pacstrap", &args);
 

@@ -223,6 +223,7 @@ pub fn ask_everything() -> Config {
         multilib,
         fs,
         gpu,
+        cpu,
         bluetooth,
         firewall,
         cups,

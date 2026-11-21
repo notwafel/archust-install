@@ -64,6 +64,7 @@ pub struct Config {
     pub multilib: bool,
     pub fs: crate::fs::Fs,
     pub gpu: crate::detect::Gpu,
+    pub cpu: crate::detect::Cpu,
     pub bluetooth: bool,
     pub firewall: bool,
     pub cups: bool,

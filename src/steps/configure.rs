@@ -122,9 +122,10 @@ fn power_state(profile: &str, platform: bool) -> String {
 fn hooks_line(cfg: &Config, hibernate: bool) -> String {
     let encrypt = if cfg.luks { "encrypt " } else { "" };
     let resume = if hibernate { "resume " } else { "" };
+    let microcode = if cfg.cpu.ucode().is_some() { "microcode " } else { "" };
     format!(
-        "HOOKS=(base udev autodetect microcode modconf kms keyboard keymap consolefont block {}{}filesystems fsck)\n",
-        encrypt, resume
+        "HOOKS=(base udev autodetect {}modconf kms keyboard keymap consolefont block {}{}filesystems fsck)\n",
+        microcode, encrypt, resume
     )
 }
 
@@ -172,6 +173,7 @@ mod tests {
             multilib: false,
             fs: f,
             gpu: detect::Gpu::Virt,
+            cpu: detect::Cpu::Intel,
             bluetooth: false,
             firewall: false,
             cups: false,
@@ -209,6 +211,16 @@ mod tests {
         let hooks = hooks_line(&cfg(fs::Fs::Btrfs, true), true);
         let (enc, res) = (hooks.find("encrypt").unwrap(), hooks.find("resume").unwrap());
         assert!(enc < res, "{}", hooks);
+    }
+
+    /// The microcode hook needs intel-ucode or amd-ucode; with neither installed mkinitcpio -P
+    /// fails, so the hook is only written when a package will exist.
+    #[test]
+    fn microcode_hook_follows_the_cpu_answer() {
+        assert!(hooks_line(&cfg(fs::Fs::Btrfs, false), false).contains("microcode"));
+        let mut none = cfg(fs::Fs::Btrfs, false);
+        none.cpu = detect::Cpu::None;
+        assert!(!hooks_line(&none, false).contains("microcode"));
     }
 
     /// A missing PlatformDriver makes ppd ignore the stored profile on platform-profile laptops.

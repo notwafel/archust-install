@@ -355,7 +355,8 @@ pacstrap -K /mnt <base-packages> <chosen-packages> <filesystem-package>
 genfstab -U /mnt
 ```
 
-`<filesystem-package>` is `e2fsprogs` for ext4, `xfsprogs` for xfs, nothing extra for btrfs.
+`<filesystem-package>` is `e2fsprogs` for ext4, `xfsprogs` for xfs, `btrfs-progs` for btrfs. Without
+it the target has no `fsck.btrfs` for the `fsck` hook and no `btrfs` tool to repair a filesystem.
 
 Accepted hibernation creates:
 

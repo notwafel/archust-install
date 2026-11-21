@@ -3,6 +3,17 @@
 All notable changes to Archust Install. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [0.4.8] - 2026-11-21
+
+### Fixed
+
+- **A btrfs install had no `btrfs-progs` in the target.** The `pacstrap` package match had no
+  btrfs arm, so `mkinitcpio -P` warned `no fsck helper found`, and the installed system had no
+  `btrfs` tool to repair a filesystem that would not mount.
+- **`mkinitcpio -P` failed without a microcode package.** `HOOKS=()` always listed `microcode`,
+  which needs `intel-ucode` or `amd-ucode`; with `None / other` selected neither was installed and
+  the initramfs build aborted. The hook is only written when a microcode package is chosen.
+
 ## [0.4.7] - 2026-11-21
 
 ### Fixed
