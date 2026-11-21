@@ -3,6 +3,15 @@
 All notable changes to Archust Install. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [0.4.4] - 2026-11-21
+
+### Fixed
+
+- **The zero overwrite aborted the install when it reached the end of the disk.** `dd` has no
+  natural end on a block device, so a full disk came back as `no space left on device` and was
+  reported as a failed step after the whole disk had already been written. `count=<size in MiB>`
+  is now passed, so `dd` stops at the end of the device and exits 0.
+
 ## [0.4.3] - 2026-11-20
 
 ### Fixed

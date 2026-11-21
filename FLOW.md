@@ -220,7 +220,7 @@ zeroes the install disk when that option was accepted:
 
 ```sh
 lsblk -lpno NAME,TYPE,FSTYPE,MOUNTPOINTS -P <disk>   # mounted or open mapper aborts
-dd if=/dev/zero of=<disk> bs=1M status=progress conv=fsync   # only when zero was chosen
+dd if=/dev/zero of=<disk> bs=1M status=progress conv=fsync count=<size in MiB>  # only when zero was chosen
 parted -s <extra-disk> mklabel gpt
 parted -s <extra-disk> mkpart data 1MiB 100%
 partprobe <extra-disk>

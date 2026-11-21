@@ -3,7 +3,7 @@
 use crate::config::{Config, ExtraDisk, ExtraFs};
 use crate::disk;
 use crate::steps::luks;
-use crate::sys::{exists, run as sh};
+use crate::sys::{exists, out, run as sh};
 use crate::ui::{die, say, warn};
 
 const MAPPER: &str = "data";
@@ -79,7 +79,20 @@ fn zero(dev: &str) {
     warn(&format!("overwriting {} with zeros, this can take hours", dev));
     // shortcut: logical sectors only; SSD wear levelling can keep old NAND cells.
     // Use blkdiscard or the drive's secure-erase command when physical erasure is required.
-    sh("dd", &["if=/dev/zero", &format!("of={}", dev), "bs=1M", "status=progress", "conv=fsync"]);
+    // A bare dd to the device only ends by failing with "no space left on device", which the runner
+    // reports as a failed step; `count` stops it at the end of the disk instead.
+    let count = format!("count={}", zero_blocks(dev));
+    sh("dd", &["if=/dev/zero", &format!("of={}", dev), "bs=1M", "status=progress", "conv=fsync", &count]);
+}
+
+/// Whole 1 MiB blocks on the device; a final partial block is left alone, because writing past the
+/// end is exactly what dd reports as "no space left on device".
+fn zero_blocks(dev: &str) -> u64 {
+    let bytes = match out("blockdev", &["--getsize64", dev]).and_then(|s| s.trim().parse::<u64>().ok()) {
+        Some(bytes) => bytes,
+        None => return disk::size_mib(dev),
+    };
+    bytes / 1048576
 }
 
 fn mkfs(fs: ExtraFs, dev: &str) {
