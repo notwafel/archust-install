@@ -3,6 +3,14 @@
 All notable changes to Archust Install. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [0.4.6] - 2026-11-21
+
+### Fixed
+
+- **README install steps no longer upgrade the live system.** `pacman -Syu --noconfirm rust git`
+  replaced the running kernel's modules with a newer `linux`, and `vfat` could not load. The steps
+  now pin `IgnorePkg = linux linux-firmware` and use `pacman -Sy --needed git rust`.
+
 ## [0.4.5] - 2026-11-21
 
 ### Fixed
