@@ -13,6 +13,9 @@ versions follow [Semantic Versioning](https://semver.org/).
   already been zeroed. The guard now stops at startup and names the missing directory.
 - **`modprobe` keeps its stderr.** Its error was discarded, so a missing module reported only a
   generic message instead of `module vfat not found in directory`.
+- **README install steps no longer upgrade the live system.** `pacman -Syu --noconfirm rust git`
+  replaced the running kernel's modules with a newer `linux`, and `vfat` could not load. The steps
+  now pin `IgnorePkg = linux linux-firmware` and use `pacman -Sy --needed git rust`.
 - **The root mount names its filesystem type.** A probe without `-t` printed `EXT4-fs (…): VFS:
   Can't find ext4 filesystem` before the btrfs mount, which reads like a failure in the log.
 

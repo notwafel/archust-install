@@ -33,10 +33,17 @@ On the Arch live ISO, as root, with the network up:
 ```sh
 mount -o remount,size=4G /run/archiso/cowspace      # live ISO ships a tiny copy-on-write layer
 sudo reflector --country Poland,Germany,Czechia --protocol https --latest 20 --sort rate --save /etc/pacman.d/mirrorlist      # u can use without --country flag
-pacman -Syu --noconfirm rust git
+echo 'IgnorePkg = linux linux-firmware' >> /etc/pacman.conf   # a newer kernel than the running one loses every module
+pacman -Sy --needed git rust                         # -Sy, never -Syu: upgrading linux in place kills vfat and the fs drivers
 git clone https://github.com/notwafel/archust-install && cd archust-install
 ./archust_install.sh
 ```
+
+The `IgnorePkg` line is mandatory. The official ISO does not ship `git` or `rust`, and installing
+them from the current repos also pulls the current `linux`: the running kernel keeps its version,
+`/usr/lib/modules/<old release>` disappears with it, and `vfat` no longer loads. The installer stops
+on the missing directory at startup, but there is nothing it can do to bring the modules back.
+Upgrade the real system inside the chroot after the install instead.
 
 `archust_install.sh` builds `target/release/archust-install` with `cargo build --release --locked`
 when `src/` or `Cargo.toml` changed, then execs it. `--locked` keeps the committed dependency
