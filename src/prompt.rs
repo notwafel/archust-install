@@ -26,9 +26,10 @@ const ZONES: [&str; 15] = [
 // configure step generates the chosen locale. `mkinitcpio` is named explicitly, as archinstall
 // does: pacman otherwise takes whatever initramfs provider the host's pacman.conf prefers, and
 // the configure step runs `mkinitcpio -P` unconditionally.
-const BASE: [&str; 11] = [
+const BASE: [&str; 13] = [
     "base", "base-devel", "mkinitcpio", "linux-firmware", "dkms",
-    "grub", "efibootmgr", "dosfstools", "mtools", "networkmanager", "sudo",
+    "grub", "efibootmgr", "dosfstools", "mtools", "networkmanager", "wpa_supplicant",
+    "wireless-regdb", "sudo",
 ];
 
 /// Optional groups, pre-ticked. Unchecked ones are not installed. Firmware is not here:
@@ -94,6 +95,7 @@ struct Keep {
     dual: bool,
     esp_part: Option<String>,
     free_start: u64,
+    free_end: u64,
     boot_mib: u64,
     format_esp: bool,
     zero_install: bool,
@@ -247,7 +249,7 @@ pub fn ask_everything() -> Config {
 /// Steps 2-3: keep the disk or wipe it, then the sizes. Re-asks until the plan fits.
 fn ask_layout(disk: &str, total_mib: u64) -> Layout {
     step(2, STEPS, "Partitioning");
-    let Keep { dual, esp_part, free_start, boot_mib, format_esp, zero_install } =
+    let Keep { dual, esp_part, free_start, free_end, boot_mib, format_esp, zero_install } =
         if disk::has_partitions(disk) {
             let table = disk::table(disk);
             note(&table);
@@ -266,7 +268,7 @@ fn ask_layout(disk: &str, total_mib: u64) -> Layout {
                         }
                     }
                     disk::EspChoice::TooSmall(free) => {
-                        warn(&format!("only {} MiB free after the last partition, 16384 MiB needed", free));
+                        warn(&format!("the largest unallocated range is {} MiB, 16384 MiB needed", free));
                         wipe(disk)
                     }
                     disk::EspChoice::NoEsp => {
@@ -295,9 +297,36 @@ fn ask_layout(disk: &str, total_mib: u64) -> Layout {
         };
 
     step(3, STEPS, "Sizes");
-    let space = layout::space_mib(&Request {
-        total_mib, boot_mib, swap_mib: 0, root_mib: 0, dualboot: dual, free_start,
-    });
+    let mut free_end = if dual { free_end } else { total_mib.saturating_sub(2) };
+    if dual {
+        // a Windows shrink leaves the free space before its recovery partition, so the chosen
+        // region is a gap, not the end of the disk
+        let free = free_end.saturating_sub(free_start).saturating_add(1);
+        loop {
+            let use_gib = ask_num(
+                &format!("Install size GiB (0 = all {} MiB free, 16 GiB minimum)", free),
+                0,
+            );
+            if use_gib == 0 {
+                break;
+            }
+            if use_gib < 16 {
+                warn("at least 16 GiB of free space are needed; 0 uses all of it");
+                continue;
+            }
+            let wanted = use_gib.saturating_mul(1024);
+            if wanted > free {
+                warn(&format!("only {} MiB free, using all of it", free));
+            }
+            free_end = free_start + wanted.min(free) - 1;
+            break;
+        }
+    }
+    let request = Request {
+        total_mib, boot_mib, swap_mib: 0, root_mib: 0, dualboot: dual, esp: dual,
+        free_start, free_end,
+    };
+    let space = layout::space_mib(&request);
     item("usable", &format!("{} MiB{}", space, if dual { " (free space)" } else { "" }));
 
     note("Recommended: swap 4 GiB, root 0 (all remaining), EFI 1024 MiB.");
@@ -311,10 +340,15 @@ fn ask_layout(disk: &str, total_mib: u64) -> Layout {
             swap_mib: swap_gib * 1024,
             root_mib: root_gib * 1024,
             dualboot: dual,
+            esp: dual,
             free_start,
+            free_end,
         });
         let Some(parts) = parts else {
-            warn(&format!("does not fit in {} MiB of usable space, try smaller sizes", space));
+            warn(&format!(
+                "does not fit in {} MiB of usable space: 16 GiB minimum, swap and root must fit",
+                space
+            ));
             continue;
         };
         let hibernate = swap_gib >= 1
@@ -325,12 +359,14 @@ fn ask_layout(disk: &str, total_mib: u64) -> Layout {
 }
 
 fn keep_existing(esp: String, free: u64, disk: &str, format_esp: bool) -> Keep {
-    say(&format!("reusing {} as /boot", esp));
+    say(&format!("reusing {} as the EFI partition", esp));
     item("free space", &format!("{} MiB", free));
+    let free_start = disk::free_start(disk);
     Keep {
         dual: true,
         esp_part: Some(esp),
-        free_start: disk::free_start(disk),
+        free_start,
+        free_end: free_start + free - 1,
         boot_mib: 0,
         format_esp,
         zero_install: false,
@@ -373,6 +409,7 @@ fn wipe_esp() -> Keep {
                 dual: false,
                 esp_part: None,
                 free_start: 1,
+                free_end: 0,
                 boot_mib: mib,
                 format_esp: false,
                 zero_install: false,
@@ -561,13 +598,14 @@ fn show_plan(disk: &str, total_mib: u64, layout: &Layout, fs: Fs, luks: bool) {
     item("filesystem", &fs.to_string());
     if let Some(e) = &layout.esp_part {
         let action = if layout.format_esp { "existing, format as FAT32" } else { "existing" };
-        item("ESP /boot", &format!("{} ({})", e, action));
+        let mount = if luks { "/boot" } else { "/efi" };
+        item(&format!("ESP {}", mount), &format!("{} ({})", e, action));
     }
     for p in &layout.parts {
         let extra = if p.role == layout::Role::Root && luks { " (LUKS2)" } else { "" };
         item(
             &format!("{:?}", p.role),
-            &format!("{} MiB {}{}", p.size(), if layout.dual { "at end of disk" } else { "new partition" }, extra),
+            &format!("{} MiB {}{}", p.size(), if layout.dual { "in free space" } else { "new partition" }, extra),
         );
     }
     if fs.is_btrfs() {

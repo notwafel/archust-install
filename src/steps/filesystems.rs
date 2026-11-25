@@ -78,7 +78,37 @@ pub fn mount(cfg: &Config, fs: &Formatted, root: &str) {
     if !crate::sys::modprobe("vfat") {
         die("vfat kernel module missing for the running kernel - reboot the live ISO, do not pacman -Syu it");
     }
-    sh("mount", &["-t", "vfat", &fs.esp, &format!("{}/boot", MNT)]);
+    let efi = efi_dir(cfg);
+    let target = format!("{}/{}", MNT, efi);
+    stdfs::create_dir_all(&target).ok();
+    sh("mount", &["-t", "vfat", &fs.esp, &target]);
+    esp_room(&target, cfg.luks);
+}
+
+/// ESP mount point. With an encrypted root the kernels have to stay on the ESP: GRUB cannot read
+/// a LUKS2 filesystem reliably, and /boot on an encrypted Btrfs would need cryptodisk. Otherwise
+/// only GRUB lives on the ESP and /boot sits on the root filesystem, so a 200 MiB Windows ESP is
+/// enough.
+pub fn efi_dir(cfg: &Config) -> &'static str {
+    if cfg.luks { "boot" } else { "efi" }
+}
+
+/// A shared Windows ESP is often small and already full. Stop with a readable message instead of
+/// letting grub-install fail later on "failed to make directory".
+fn esp_room(path: &str, luks: bool) {
+    let free = out("df", &["-B1", "--output=avail", path])
+        .and_then(|s| s.lines().nth(1)?.trim().parse::<u64>().ok())
+        .map(|bytes| bytes / 1048576);
+    // LUKS keeps the kernel and both initramfs images on the ESP; plain installs only hold GRUB
+    let need = if luks { 256 } else { 64 };
+    if let Some(free) = free
+        && free < need
+    {
+        die(&format!(
+            "{} has only {} MiB free; GRUB needs about {} MiB. Delete unused files from the ESP or enlarge it, then install again",
+            path, free, need
+        ));
+    }
 }
 
 /// UUID of the root filesystem (LUKS mapper when encrypted).

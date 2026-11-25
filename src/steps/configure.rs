@@ -2,7 +2,7 @@
 
 use crate::config::{Config, Power};
 use crate::steps::luks;
-use crate::sys::{MNT, chroot, chroot_log, quiet, with_stdin, write_file};
+use crate::sys::{MNT, chroot, chroot_log, quiet, run, with_stdin, write_file};
 use crate::ui::{die, say, warn};
 
 pub fn configure(cfg: &Config, root_dev: &str, raw_dev: &str, swap: &Option<(String, bool)>) {
@@ -56,13 +56,15 @@ pub fn configure(cfg: &Config, root_dev: &str, raw_dev: &str, swap: &Option<(Str
     // --removable also writes the fallback path esp/EFI/BOOT/BOOTX64.EFI. Some firmware, MSI
     // boards in particular (ArchWiki GRUB), only ever looks there and ignores the NVRAM entry that
     // --bootloader-id creates, so the disk does not appear in the boot menu without it.
+    let efi = crate::steps::filesystems::efi_dir(cfg);
+    let efi_arg = format!("--efi-directory=/{}", efi);
     chroot(&[
-        "grub-install", "--target=x86_64-efi", "--efi-directory=/boot",
+        "grub-install", "--target=x86_64-efi", &efi_arg,
         "--bootloader-id=GRUB", "--removable",
     ]);
     chroot(&["grub-mkconfig", "-o", "/boot/grub/grub.cfg"]);
     // the boot menu may be wrong, but a missing fallback binary is the machine that does not boot
-    let fallback = format!("{}/boot/EFI/BOOT/BOOTX64.EFI", crate::sys::MNT);
+    let fallback = format!("{}/{}/EFI/BOOT/BOOTX64.EFI", crate::sys::MNT, efi);
     if !crate::sys::exists(&fallback) {
         die(&format!("grub-install did not write {}, and the firmware may not list the disk", fallback));
     }
@@ -77,19 +79,56 @@ fn users(cfg: &Config) {
     if !crate::sys::exists(&format!("{}{}", crate::sys::MNT, cfg.shell)) {
         crate::ui::die(&format!("{} is not in the target, login shell would be broken", cfg.shell));
     }
-    quiet("arch-chroot", &[crate::sys::MNT, "useradd", "-m", "-G", "wheel", "-s", &cfg.shell, &cfg.user]);
+    chroot(&["useradd", "-m", "-G", "wheel", "-s", &cfg.shell, &cfg.user]);
     if !crate::sys::exists(&format!("{}/home/{}", crate::sys::MNT, cfg.user)) {
         crate::ui::die(&format!("useradd failed for {}", cfg.user));
     }
     with_stdin(&format!("{}:{}\n", cfg.user, cfg.user_pass), "arch-chroot", &[crate::sys::MNT, "chpasswd"]);
     with_stdin(&format!("root:{}\n", cfg.root_pass), "arch-chroot", &[crate::sys::MNT, "chpasswd"]);
+    // a shell must be listed in /etc/shells or chsh refuses it later; useradd itself accepts any path
+    add_shell(&cfg.shell);
+    if !user_has_shell(cfg) {
+        crate::ui::die(&format!("{} does not have {} as its login shell", cfg.user, cfg.shell));
+    }
     write_file("/etc/sudoers.d/10-wheel", "%wheel ALL=(ALL:ALL) ALL\n");
-    quiet("chmod", &["440", &format!("{}/etc/sudoers.d/10-wheel", crate::sys::MNT)]);
-    quiet("chmod", &["700", &format!("{}/root", crate::sys::MNT)]);
+    run("chmod", &["440", &format!("{}/etc/sudoers.d/10-wheel", crate::sys::MNT)]);
+    run("chmod", &["700", &format!("{}/root", crate::sys::MNT)]);
+}
+
+/// Adds the login shell to `/etc/shells` when the package did not.
+fn add_shell(shell: &str) {
+    let path = format!("{}/etc/shells", crate::sys::MNT);
+    let mut body = std::fs::read_to_string(&path).unwrap_or_default();
+    if body.lines().any(|line| line.trim() == shell) {
+        return;
+    }
+    if !body.is_empty() && !body.ends_with('\n') {
+        body.push('\n');
+    }
+    body.push_str(shell);
+    body.push('\n');
+    std::fs::write(&path, body)
+        .unwrap_or_else(|_| crate::ui::die(&format!("cannot write {}", path)));
+}
+
+/// `useradd -s` does not validate the path; read the account's real login shell back.
+fn user_has_shell(cfg: &Config) -> bool {
+    let path = format!("{}/etc/passwd", crate::sys::MNT);
+    std::fs::read_to_string(path)
+        .unwrap_or_default()
+        .lines()
+        .find(|line| line.starts_with(&format!("{}:", cfg.user)))
+        .and_then(|line| line.rsplit(':').next())
+        == Some(cfg.shell.as_str())
 }
 
 fn services(cfg: &Config) {
     say("Services");
+    // a missing NetworkManager used to show up only after reboot as "no network", not as a
+    // failed install; pacstrap wrote no binary, so name it here
+    if !crate::sys::exists(&format!("{}/usr/bin/NetworkManager", MNT)) {
+        crate::ui::die("NetworkManager is missing from the target; reinstalling the network packages is required");
+    }
     chroot(&["systemctl", "enable", "NetworkManager", "systemd-timesyncd", "fstrim.timer"]);
     if cfg.bluetooth {
         // fatal: silently leaving the chosen service disabled looks like a working install

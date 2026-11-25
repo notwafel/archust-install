@@ -148,7 +148,9 @@ to resolve in the repos for the empty target.
      ```
 
    - With existing partitions, dualboot needs an existing `EFI System` partition and at least
-     16 GiB after the last partition. Otherwise, the wipe branch is used.
+     16 GiB of unallocated space in the largest free range. The range may sit between partitions:
+     shrinking Windows leaves free space before its recovery partition, not after the last
+     partition. Otherwise, the wipe branch is used.
 
      ```sh
      blkid -s TYPE -o value <efi-device>
@@ -166,6 +168,8 @@ to resolve in the repos for the empty target.
      never authorizes a wipe.
 
 3. **Sizes**
+   - Dualboot first asks how many GiB of the free range to use (`0` = all of it). The chosen end
+     becomes the limit for swap and root, so the rest of the gap stays unallocated.
    - Swap default: 4 GiB.
    - Root default: all remaining usable space; the prompt prints how many MiB that is.
    - EFI default: 1024 MiB, minimum 300 MiB.
@@ -279,13 +283,13 @@ lsblk -lpno NAME,TYPE,FSTYPE,MOUNTPOINTS -P <disk>
 `[SWAP]` mountpoint is active and switched off with `swapoff <device>` (`-p` makes the names
 absolute). A `TYPE=crypt` child is an open LUKS mapper: the run aborts and prints
 `cryptsetup close <mapper>`; it is never closed automatically. A mounted partition aborts with its
-device and mountpoint. Then it runs:
+device and mountpoint. A full wipe then runs:
 
 ```sh
 parted -s <disk> mklabel gpt
 ```
 
-For each planned partition:
+Dualboot keeps the existing table. For each planned partition:
 
 ```sh
 parted -sm <disk> unit MiB print
@@ -299,8 +303,9 @@ udevadm settle                                    # EFI only
 ```
 
 The second `parted` table must contain exactly one new partition number. `udevadm settle` waits
-for device nodes before later format commands. The root partition stops at `total - 2` MiB, so
-`end-plus-one` stays below the device size and clear of the backup GPT. Device paths are derived
+for device nodes before later format commands. A wipe's root stops at `total - 2` MiB; a dualboot
+root stops at the chosen end of the free range. Either way `end-plus-one` stays below the device
+size and clear of the backup GPT. Device paths are derived
 as:
 
 ```text
@@ -347,8 +352,15 @@ btrfs subvolume create /mnt/@                         # btrfs, then @home @log @
 umount /mnt                                           # btrfs
 mount -t btrfs -o subvol=@,noatime,compress=zstd:1 <root> /mnt # btrfs
 modprobe vfat                                         # fatal if the running kernel has no vfat; stderr is kept
-mount -t vfat <efi-device> /mnt/boot
+mount -t vfat <efi-device> /mnt/efi                    # plain install: kernels stay in /boot on the root
+mount -t vfat <efi-device> /mnt/boot                   # LUKS root: kernels have to stay on the ESP
 ```
+
+For a plain install the ESP is mounted at `/efi` and `/boot` remains a directory on the root
+filesystem, so a 200 MiB Windows ESP only has to hold GRUB. A LUKS root keeps the current
+`/boot`-on-ESP layout, because GRUB cannot read an encrypted Btrfs root reliably. The mount step
+checks the ESP's free space: below 64 MiB (plain) or 256 MiB (LUKS) it stops with the path and the
+amount to free instead of failing later inside `grub-install`.
 
 For btrfs, the temporary top-level mount creates all five subvolumes before mounting `@` as root:
 
@@ -425,9 +437,10 @@ arch-chroot /mnt hwclock --systohc                          # quiet(), warnings 
 arch-chroot /mnt locale-gen
 arch-chroot /mnt sysctl --system
 arch-chroot /mnt mkinitcpio -P                              # output scanned: any ERROR line is fatal
-arch-chroot /mnt grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=GRUB --removable
+arch-chroot /mnt grub-install --target=x86_64-efi --efi-directory=<efi> --bootloader-id=GRUB --removable
 arch-chroot /mnt grub-mkconfig -o /boot/grub/grub.cfg
-/mnt/boot/EFI/BOOT/BOOTX64.EFI exists                       # fatal otherwise
+/mnt/<efi>/EFI/BOOT/BOOTX64.EFI exists                      # fatal otherwise
+/mnt/usr/bin/NetworkManager exists                          # fatal otherwise
 arch-chroot /mnt systemctl enable NetworkManager systemd-timesyncd fstrim.timer
 arch-chroot /mnt systemctl disable fstrim.timer                       # btrfs root only
 arch-chroot /mnt systemctl enable bluetooth.service        # Bluetooth only
@@ -442,20 +455,24 @@ Every `systemctl enable` above is fatal on failure: a silently disabled service 
 boot; when the live hardware exposes `/sys/firmware/acpi/platform_profile`, it also stores
 `PlatformDriver=platform_profile` so power-profiles-daemon does not reject the saved profile.
 
+`<efi>` is `/efi` for a plain install and `/boot` for a LUKS root.
+
 Required check:
 
 ```text
-/mnt/boot/EFI/GRUB/grubx64.efi exists
+/mnt/<efi>/EFI/GRUB/grubx64.efi exists
 ```
 
 User setup:
 
 ```sh
-arch-chroot /mnt useradd -m -G wheel -s <shell> <user>
+arch-chroot /mnt useradd -m -G wheel -s <shell> <user>   # fatal on failure
 arch-chroot /mnt chpasswd    # stdin: <user>:<password>
 arch-chroot /mnt chpasswd    # stdin: root:<password>
-chmod 440 /mnt/etc/sudoers.d/10-wheel
-chmod 700 /mnt/root
+/etc/shells contains <shell>                              # added when missing
+/etc/passwd ends the <user> line with <shell>            # checked, fatal otherwise
+chmod 440 /mnt/etc/sudoers.d/10-wheel                     # fatal on failure
+chmod 700 /mnt/root                                       # fatal on failure
 ```
 
 When the optional reflector group is selected:

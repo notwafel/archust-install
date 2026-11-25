@@ -85,18 +85,20 @@ re-asked; a wrong typed wipe confirmation aborts.
 | step | section | what | default |
 |---|---|---|---|
 | 1 | Disk | select a whole disk, shown with size, model, partition count, `empty`, `whole-disk <fstype>` or `in use`; the live ISO boot disk is excluded; other disks can be erased first with optional secure erase, ext4/btrfs/xfs/exFAT/FAT32 and LUKS2 | first listed disk; no extra disks |
-| 2 | Partitioning | reuse an existing ESP and install after the last partition, or wipe; a non-FAT ESP offers formatting; a full wipe can securely erase the disk | keep existing partitions when present; secure erase off |
-| 3 | Sizes | swap GiB, root GiB (`0` = remaining usable space), EFI size for a wipe | `4`, `0`, `1024` MiB |
+| 2 | Partitioning | reuse an existing ESP and install into the largest unallocated range (including a gap left by shrinking Windows), or wipe; a non-FAT ESP offers formatting; a full wipe can securely erase the disk | keep existing partitions when present; secure erase off |
+| 3 | Sizes | dualboot: GiB of free space to use; then swap GiB, root GiB (`0` = remaining), EFI size for a wipe | all free space, `4`, `0`, `1024` MiB |
 | 4 | Filesystem and encryption | btrfs / ext4 / xfs, optional LUKS, then show the plan | btrfs, LUKS off |
 | 5 | Hardware | kernel, CPU microcode, GPU driver | `linux`, detected CPU, detected GPU |
 | 6 | Packages | multilib, Wayland + XWayland, optional groups (firmware follows the GPU), Bluetooth, UFW, CUPS, power management | all groups selected; Bluetooth, CUPS off; UFW and power-profiles-daemon balanced on |
 | 7 | System | hostname, username, searchable timezone, keymap, locale and login shell | —, —, UTC, us, en_US, bash |
 | 8 | Passwords | LUKS passphrase when selected, user and root passwords | minimum 8 characters, typed twice |
 
-The dualboot branch requires an existing ESP and at least 16 GiB after the last partition. An
-empty disk always takes the wipe branch. A new EFI partition must be at least 300 MiB; an existing
-one is reused as is. A non-FAT32 ESP can be formatted in place after a separate confirmation, or
-the run falls back to the wipe branch.
+The dualboot branch requires an existing ESP and at least 16 GiB in the largest unallocated
+range. That range may be between partitions: a Windows shrink leaves the free space before its
+recovery partition. Only the chosen part of the range is used; swap is carved out of it and root
+takes the rest. An empty disk always takes the wipe branch. A new EFI partition must be at least
+300 MiB; an existing one is reused as is. A non-FAT32 ESP can be formatted in place after a
+separate confirmation, or the run falls back to the wipe branch.
 
 Other disks can be erased in the same run: each selected disk needs its exact path typed back,
 then gets one GPT partition with ext4, btrfs, xfs, exFAT, FAT32 or no filesystem. Secure erase and
@@ -134,20 +136,24 @@ before any prompt: the install always ends with an x86_64 EFI GRUB.
 
 <br>
 
-- GPT, UEFI only. Full wipe or dualboot. Dualboot reuses an existing EFI partition as `/boot` and
-  creates new partitions after the last existing one.
+- GPT, UEFI only. Full wipe or dualboot. Dualboot reuses an existing EFI partition and creates
+  new partitions inside the largest free range. Without LUKS the ESP is mounted at `/efi` and
+  `/boot` stays on the root filesystem, so a small Windows ESP only holds GRUB. A LUKS root keeps
+  `/boot` on the ESP, because GRUB cannot read an encrypted root reliably.
 - **btrfs**: `@`, `@home`, `@log`, `@pkg`, `@snapshots`; mounted with
   `noatime,compress=zstd:1`. **ext4** or **xfs**: one root filesystem mounted with `noatime`.
   `e2fsprogs` or `xfsprogs` is added to `pacstrap` for the selected filesystem.
 - Optional **LUKS2** on the root partition: AES-XTS-plain64, 512-bit key, SHA-512 and Argon2id.
   The passphrase reaches `cryptsetup` on stdin, never on the command line.
-- **GRUB** EFI: `--target=x86_64-efi`, `GRUB_TERMINAL=console`, `GRUB_TIMEOUT=3`,
-  `loglevel=3 quiet rw`, `os-prober` enabled. The install checks for
-  `/boot/EFI/GRUB/grubx64.efi` after `grub-install`.
+- **GRUB** EFI: `--target=x86_64-efi`, `--efi-directory=/efi` (plain) or `/boot` (LUKS),
+  `GRUB_TERMINAL=console`, `GRUB_TIMEOUT=3`, `loglevel=3 quiet rw`, `os-prober` enabled. The
+  install checks for `EFI/GRUB/grubx64.efi` and the `BOOTX64.EFI` fallback after `grub-install`.
 - Nvidia adds `nvidia_drm.modeset=1` and
   `nvidia.NVreg_PreserveVideoMemoryAllocations=1`, initramfs modules, and
   `systemd-udevd` with `PrivateMounts=no`.
-- NetworkManager, `systemd-timesyncd` and `fstrim.timer` are always enabled. Optional picks enable
+- NetworkManager, `systemd-timesyncd` and `fstrim.timer` are always enabled; NetworkManager and
+  its Wi-Fi dependencies (`wpa_supplicant`, `wireless-regdb`) are in the base list and the binary is
+  checked in the target before the service is enabled. Optional picks enable
   `bluetooth.service`, `ufw.service` (incoming denied, outgoing allowed), `cups.service`, and
   either `power-profiles-daemon.service` with the chosen initial profile or `tlp.service`.
 
@@ -160,8 +166,8 @@ before any prompt: the install always ends with an x86_64 EFI GRUB.
 
 ```text
 Always:
-  base base-devel linux-firmware dkms
-  grub efibootmgr dosfstools mtools networkmanager sudo
+  base base-devel mkinitcpio linux-firmware dkms
+  grub efibootmgr dosfstools mtools networkmanager wpa_supplicant wireless-regdb sudo
   selected kernel and its headers; selected CPU microcode
 
 Selected GPU:
@@ -244,7 +250,8 @@ No desktop environment, no browser, no compositor. Archust Install stops at a sy
 - `/etc/sysctl.d/99-no-core-dumps.conf`: `kernel.core_pattern = |/bin/false` - a crash writes no multi-GB dump to disk.
 - multilib: `[multilib]` uncommented in `/etc/pacman.conf`, on the installed system and on the live ISO (so pacstrap can pull the `lib32-*` packages). The target copy is read back and the install stops if it is still commented out.
 - GRUB: `loglevel=3 quiet rw`, `GRUB_TIMEOUT=3`, console terminal.
-- `%wheel` gets sudo through `/etc/sudoers.d/10-wheel`.
+- `%wheel` gets sudo through `/etc/sudoers.d/10-wheel`; `useradd`, the sudoers mode and the chosen
+  login shell are verified, not just written.
 - Mirrors: `reflector` selects the 10 latest HTTPS mirrors from trusted countries and sorts them
   by rate before anything else runs. One setting table renders
   `/etc/xdg/reflector/reflector.conf` and its command-line flags; reflector has no `--config`.
@@ -325,9 +332,9 @@ Runs the partition arithmetic on fixed cases (wipe, dualboot, swap, fixed root) 
   All three use fuzzy search; `Esc` moves back one system picker and aborts at the first.
 - GPU detection chooses a default only. It does not validate NVIDIA hardware compatibility with
   the selected driver package.
-- Dualboot needs an existing EFI partition and at least 16 GiB after the last partition. No
-  shrinking or resizing of existing partitions. A non-`vfat` ESP must be formatted as FAT32
-  first; declining falls back to the wipe branch.
+- Dualboot needs an existing EFI partition and at least 16 GiB in the largest unallocated range,
+  which may sit between partitions. No shrinking or resizing of existing partitions. A non-`vfat`
+  ESP must be formatted as FAT32 first; declining falls back to the wipe branch.
 - No snapshot tool, zram or encrypted swap.
 - Secure erase asks the drive itself, not the operating system: `nvme sanitize` (crypto, block or
   overwrite action, depending on the drive's `sanicap`, falling back to `nvme format -s 2`/`-s 1`),

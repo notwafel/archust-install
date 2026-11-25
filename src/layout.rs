@@ -25,29 +25,30 @@ pub struct Request {
     pub swap_mib: u64,
     pub root_mib: u64,
     pub dualboot: bool,
-    pub free_start: u64, // MiB, dualboot only
+    /// The disk keeps an existing ESP; no ESP partition is added to the plan.
+    pub esp: bool,
+    pub free_start: u64, // MiB, first usable free MiB
+    pub free_end: u64,   // MiB, last usable free MiB (inclusive)
 }
 
-/// Unpartitioned room after the last existing partition. Dualboot plans live here, not in
-/// `total_mib`: an existing system may fill the disk almost completely and still have room.
+/// Unallocated room chosen for the plan. Dualboot plans live in the largest free region, not in
+/// `total_mib`: an existing system may fill the disk and still leave a gap between partitions.
 pub fn free_mib(r: &Request) -> u64 {
-    // the last usable MiB is total - 2, the backup GPT needs the one after it
-    r.total_mib.saturating_sub(r.free_start).saturating_sub(1)
+    r.free_end.saturating_sub(r.free_start).saturating_add(1)
 }
 
-/// `None` when the request does not fit. An existing ESP (dualboot) is not in the result.
+/// `None` when the request does not fit. An existing ESP is not in the result.
 pub fn plan(r: Request) -> Option<Vec<Part>> {
     let space = space_mib(&r);
     if space < 16384 {
         return None;
     }
-    let esp_exists = r.dualboot && r.free_start > 1;
-    if !esp_exists && r.boot_mib < 300 {
+    if !r.esp && r.boot_mib < 300 {
         return None;
     }
     let mut parts = Vec::with_capacity(3);
     let mut s = if r.dualboot { r.free_start } else { 1 };
-    if !esp_exists {
+    if !r.esp {
         let e = s + r.boot_mib - 1;
         parts.push(Part { role: Role::Esp, start: s, end: e });
         s = e + 1;
@@ -57,8 +58,14 @@ pub fn plan(r: Request) -> Option<Vec<Part>> {
         parts.push(Part { role: Role::Swap, start: s, end: e });
         s = e + 1;
     }
-    let e = if r.root_mib > 0 { s + r.root_mib - 1 } else { r.total_mib - 2 };
-    if e >= r.total_mib - 1 || e < s {
+    // the last usable MiB is total - 2, the backup GPT needs the one after it
+    let limit = if r.dualboot {
+        r.free_end.min(r.total_mib.saturating_sub(2))
+    } else {
+        r.total_mib.saturating_sub(2)
+    };
+    let e = if r.root_mib > 0 { s + r.root_mib - 1 } else { limit };
+    if e > limit || e < s {
         return None;
     }
     parts.push(Part { role: Role::Root, start: s, end: e });
@@ -95,7 +102,9 @@ pub fn self_check() -> bool {
             swap_mib: swap * 1024,
             root_mib: root * 1024,
             dualboot: dual,
+            esp: dual,
             free_start: free,
+            free_end: total.saturating_sub(2),
         };
         match plan(r) {
             Some(p) if valid(&p, total) => {
@@ -109,13 +118,13 @@ pub fn self_check() -> bool {
         }
     }
     let rejected = [
-        Request { total_mib: 204800, boot_mib: 1024, swap_mib: 0, root_mib: 300 * 1024, dualboot: false, free_start: 1 },
-        Request { total_mib: 8192, boot_mib: 1024, swap_mib: 0, root_mib: 0, dualboot: false, free_start: 1 },
-        Request { total_mib: 204800, boot_mib: 256, swap_mib: 0, root_mib: 0, dualboot: false, free_start: 1 },
+        Request { total_mib: 204800, boot_mib: 1024, swap_mib: 0, root_mib: 300 * 1024, dualboot: false, esp: false, free_start: 1, free_end: 204798 },
+        Request { total_mib: 8192, boot_mib: 1024, swap_mib: 0, root_mib: 0, dualboot: false, esp: false, free_start: 1, free_end: 8190 },
+        Request { total_mib: 204800, boot_mib: 256, swap_mib: 0, root_mib: 0, dualboot: false, esp: false, free_start: 1, free_end: 204798 },
         // dualboot, but the existing system fills the whole disk: nothing left to install into
-        Request { total_mib: 204800, boot_mib: 0, swap_mib: 0, root_mib: 0, dualboot: true, free_start: 204800 },
+        Request { total_mib: 204800, boot_mib: 0, swap_mib: 0, root_mib: 0, dualboot: true, esp: true, free_start: 204800, free_end: 204798 },
         // dualboot with only 8 GiB of free space
-        Request { total_mib: 204800, boot_mib: 0, swap_mib: 0, root_mib: 0, dualboot: true, free_start: 196608 },
+        Request { total_mib: 204800, boot_mib: 0, swap_mib: 0, root_mib: 0, dualboot: true, esp: true, free_start: 196608, free_end: 204798 },
     ];
     for r in rejected {
         if plan(r).is_some() {
@@ -131,8 +140,17 @@ mod tests {
     use super::{free_mib, plan, Request};
 
     fn last_end(total_mib: u64, boot_mib: u64, swap_mib: u64, free_start: u64, dual: bool) -> u64 {
-        let parts = plan(Request { total_mib, boot_mib, swap_mib, root_mib: 0, dualboot: dual, free_start })
-            .expect("plan fits");
+        let parts = plan(Request {
+            total_mib,
+            boot_mib,
+            swap_mib,
+            root_mib: 0,
+            dualboot: dual,
+            esp: dual,
+            free_start,
+            free_end: total_mib.saturating_sub(2),
+        })
+        .expect("plan fits");
         parts.last().unwrap().end
     }
 
@@ -154,7 +172,9 @@ mod tests {
             swap_mib: 0,
             root_mib: 0,
             dualboot: true,
+            esp: true,
             free_start: 102401,
+            free_end: 204798,
         };
         let parts = plan(r).expect("dualboot fits");
         assert_eq!(parts.last().unwrap().size(), free_mib(&r));

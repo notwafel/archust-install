@@ -148,10 +148,47 @@ pub fn table(disk: &str) -> String {
     out("parted", &["-sm", disk, "unit", "MiB", "print"]).unwrap_or_default()
 }
 
-/// Unpartitioned space after the last partition, in MiB, for a known disk size.
-pub fn free_mib_from_table(table: &str, total_mib: u64) -> u64 {
-    // the last usable MiB is total - 2, the backup GPT needs the one after it
-    total_mib.saturating_sub(last_end_from_table(table)).saturating_sub(1)
+/// Every unallocated MiB range on the disk, including gaps between existing partitions (a
+/// Windows shrink leaves the free space before its recovery partition). One MiB is kept clear
+/// before a following partition, because the plan passes `end + 1` to parted.
+pub fn free_gaps(table: &str, total_mib: u64) -> Vec<(u64, u64)> {
+    let usable_end = total_mib.saturating_sub(2);
+    if usable_end < 2 {
+        return Vec::new();
+    }
+    let mut used = table
+        .lines()
+        .filter_map(|line| {
+            let fields = line.split(':').collect::<Vec<_>>();
+            fields.first()?.parse::<u32>().ok()?;
+            let start = fields.get(1)?.trim_end_matches("MiB").parse::<f64>().ok()? as u64;
+            let end = fields.get(2)?.trim_end_matches("MiB").parse::<f64>().ok()? as u64;
+            (start <= end).then_some((start, end))
+        })
+        .collect::<Vec<_>>();
+    used.sort_unstable();
+
+    let mut gaps = Vec::new();
+    let mut cursor = 1u64;
+    for (start, end) in used {
+        let gap_end = start.saturating_sub(2);
+        if gap_end > cursor {
+            gaps.push((cursor, gap_end));
+        }
+        cursor = cursor.max(end.saturating_add(1));
+    }
+    if usable_end > cursor {
+        gaps.push((cursor, usable_end));
+    }
+    gaps
+}
+
+/// The largest unallocated range, in MiB. Dualboot installs into this gap, not only into space
+/// after the last partition.
+pub fn largest_gap(table: &str, total_mib: u64) -> Option<(u64, u64)> {
+    free_gaps(table, total_mib)
+        .into_iter()
+        .max_by_key(|(start, end)| end - start)
 }
 
 /// What step 2 does with a disk that already has partitions.
@@ -161,7 +198,7 @@ pub enum EspChoice {
     Reuse(u64),
     /// Enough free space, but the ESP needs a fresh FAT32 filesystem.
     Format(u64),
-    /// Free space after the last partition, which is below the 16 GiB dualboot minimum.
+    /// Largest unallocated range, below the 16 GiB dualboot minimum.
     TooSmall(u64),
     /// No EFI System partition to reuse.
     NoEsp,
@@ -169,7 +206,8 @@ pub enum EspChoice {
 
 /// Pure keep/wipe decision; `table` is `parted -sm` output for `total_mib`.
 pub fn keep_choice(table: &str, total_mib: u64, esp: Option<&str>, fstype: &str) -> EspChoice {
-    let free = free_mib_from_table(table, total_mib);
+    let free = largest_gap(table, total_mib)
+        .map_or(0, |(start, end)| end.saturating_sub(start).saturating_add(1));
     match esp {
         None => EspChoice::NoEsp,
         Some(_) if free < 16384 => EspChoice::TooSmall(free),
@@ -238,21 +276,13 @@ pub fn has_partitions(disk: &str) -> bool {
         .is_some_and(|t| t.lines().any(|l| l.trim() == "part"))
 }
 
-/// Last used MiB + 2: one MiB alignment gap, parted ends are inclusive.
+/// Start of the largest unallocated range, in MiB.
 pub fn free_start(disk: &str) -> u64 {
     let table = out("parted", &["-sm", disk, "unit", "MiB", "print"])
         .unwrap_or_else(|| die("cannot read the partition table"));
-    last_end_from_table(&table) + 2
-}
-
-/// `parted -sm` partition rows start with the partition number; the disk row starts with `/dev/`.
-fn last_end_from_table(table: &str) -> u64 {
-    table.lines()
-        .filter(|line| line.split(':').next().is_some_and(|n| n.parse::<u32>().is_ok()))
-        .filter_map(|line| line.split(':').nth(2))
-        .filter_map(|end| end.trim_end_matches("MiB").parse::<f64>().ok())
-        .fold(0f64, f64::max)
-        .ceil() as u64
+    largest_gap(&table, size_mib(disk))
+        .map(|(start, _)| start)
+        .unwrap_or_else(|| die("no unallocated space to install into"))
 }
 
 pub fn existing_esp(disk: &str) -> Option<String> {
@@ -332,7 +362,7 @@ pub fn swap_device(parts: &[Part], devices: &[String], hibernate: bool) -> Optio
 #[cfg(test)]
 mod tests {
     use super::{
-        EspChoice, dev_name, disk_names, keep_choice, last_end_from_table, partition_count,
+        EspChoice, dev_name, disk_names, free_gaps, keep_choice, largest_gap, partition_count,
         partition_numbers_from_table, usage_from,
     };
 
@@ -382,21 +412,29 @@ mod tests {
     }
 
     #[test]
-    fn free_start_follows_the_last_partition() {
-        // parted machine output: the disk row starts with /dev/, partition rows with a number
-        let table = "BYT;\n/dev/sda:204800MiB:scsi:512:512:gpt:;\n1:1MiB:513MiB:512MiB:fat32:archust-efi:esp;\n3:514MiB:1023MiB:510MiB:ext4:archust-root:;\n";
-        assert_eq!(last_end_from_table(table), 1023);
-    }
-
-    #[test]
     fn keep_choice_reuses_only_a_fat_esp_with_enough_room() {
         let table = "BYT;\n/dev/sda:204800MiB:scsi:512:512:gpt:;\n1:1MiB:1023MiB:1022MiB:ext4:old-root:;\n";
-        let free = 204800 - 1023 - 1;
+        let free = 204800 - 1023 - 2;
         assert_eq!(keep_choice(table, 204800, Some("/dev/sda1"), "vfat"), EspChoice::Reuse(free));
         assert_eq!(keep_choice(table, 204800, Some("/dev/sda1"), "ext4"), EspChoice::Format(free));
         assert_eq!(keep_choice(table, 204800, None, ""), EspChoice::NoEsp);
 
         let big = "BYT;\n/dev/sda:204800MiB:scsi:512:512:gpt:;\n1:1MiB:190000MiB:189999MiB:ext4:old-root:;\n";
-        assert_eq!(keep_choice(big, 204800, Some("/dev/sda1"), "vfat"), EspChoice::TooSmall(14799));
+        assert_eq!(keep_choice(big, 204800, Some("/dev/sda1"), "vfat"), EspChoice::TooSmall(14798));
+    }
+
+    #[test]
+    fn shrink_gap_between_windows_partitions_counts_as_free_space() {
+        // Windows shrinks C:, leaving unallocated space before the recovery partition at the end
+        let table = "BYT;\n/dev/nvme0n1:1000000MiB:scsi:512:512:gpt:;\n1:1MiB:260MiB:260MiB:fat32:EFI:boot,esp;\n2:261MiB:500000MiB:499740MiB:ntfs:Windows:msftdata;\n3:999749MiB:999998MiB:250MiB:ntfs:Recovery:;\n";
+        assert_eq!(largest_gap(table, 1000000), Some((500001, 999747)));
+        assert_eq!(free_gaps(table, 1000000), [(500001, 999747)]);
+    }
+
+    #[test]
+    fn no_gap_when_the_last_partition_reaches_the_backup_gpt() {
+        let table = "BYT;\n/dev/sda:204800MiB:scsi:512:512:gpt:;\n1:1MiB:204798MiB:204798MiB:ext4:full:;\n";
+        assert!(free_gaps(table, 204800).is_empty());
+        assert_eq!(largest_gap(table, 204800), None);
     }
 }

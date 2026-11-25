@@ -3,6 +3,28 @@
 All notable changes to Archust Install. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow [Semantic Versioning](https://semver.org/).
 
+## [0.8.0] - 2026-11-25
+
+### Fixed
+
+- **Dualboot ignored free space before a trailing Windows recovery partition.** The installer only
+  looked after the last partition, and a Windows shrink leaves the unallocated space between `C:`
+  and the recovery partition. It now finds every unallocated range, picks the largest, and asks how
+  many GiB of it to use; swap and root are carved out of that choice. The rest of the range stays
+  unallocated, and no existing partition is touched.
+- **A 200 MiB shared Windows ESP ran out of space mid-install.** A plain (non-LUKS) install now
+  mounts the ESP at `/efi` and keeps `/boot` on the root filesystem, so the ESP only holds GRUB.
+  Previously kernels and initramfs images landed on the ESP, `mkinitcpio -P` failed with "No space
+  left on device", `bsdtar` reported a write error and `grub-install` could not create
+  `/efi/EFI/GRUB`. A LUKS root keeps the old `/boot`-on-ESP layout on purpose; the mount step now
+  checks the ESP's free space and stops with the path and the amount to free.
+- **User, home directory and sudo setup could be half-done.** `useradd` and both `chmod` calls are
+  now fatal instead of silent, the chosen shell is added to `/etc/shells` and read back from
+  `/etc/passwd`, so a fish/zsh selection cannot silently fall back to bash.
+- **The target could miss NetworkManager with no clear error.** `wpa_supplicant` and
+  `wireless-regdb` are now in the base package list, and the configure step checks for the
+  NetworkManager binary before enabling the service.
+
 ## [0.7.0] - 2026-11-21
 
 ### Fixed
